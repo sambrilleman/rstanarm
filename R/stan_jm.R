@@ -141,11 +141,9 @@
 #'   are those described for \code{\link[rstan]{stan}}.  
 #' @param priorLong,priorEvent,priorAssoc The prior distributions for the 
 #'   regression coefficients in the longitudinal submodel(s), event submodel,
-#'   and the association parameter(s).
-#'    
-#'   Can be a call to one of the various functions provided by 
-#'   \pkg{rstanarm} for specifying priors. The subset of these functions that 
-#'   can be used for the prior on the coefficients can be grouped into several 
+#'   and the association parameter(s). Can be a call to one of the various functions 
+#'   provided by \pkg{rstanarm} for specifying priors. The subset of these functions 
+#'   that can be used for the prior on the coefficients can be grouped into several 
 #'   "families":
 #'   
 #'   \tabular{ll}{
@@ -216,7 +214,11 @@
 #'   \code{basehaz = "bs"} the auxiliary parameters are the coefficients for the
 #'   B-spline approximation to the log baseline hazard.
 #'   For \code{basehaz = "piecewise"} the auxiliary parameters are the piecewise
-#'   estimates of the log baseline hazard. 
+#'   estimates of the log baseline hazard.
+#' @param long_lp A logical scalar (defaulting to TRUE) indicating whether to 
+#'   conditioning on the longitudinal outcome(s).    
+#' @param event_lp A logical scalar (defaulting to TRUE) indicating whether to 
+#'   conditioning on the event outcome.
 #'   
 #' @details The \code{stan_jm} function can be used to fit a joint model (also 
 #'   known as a shared parameter model) for longitudinal and time-to-event data 
@@ -230,7 +232,17 @@
 #'   \cr 
 #'   For the longitudinal submodel a generalised linear mixed model is assumed 
 #'   with any of the \code{\link[stats]{family}} choices allowed by 
-#'   \code{\link[lme4]{glmer}}. \cr
+#'   \code{\link[lme4]{glmer}}. If a multivariate joint model is specified (by
+#'   providing a list of formulas in the \code{formulaLong} argument), then
+#'   the multivariate longitudinal submodel consists of a multivariate generalized  
+#'   linear model (GLM) with group-specific terms that are assumed to be correlated
+#'   across the different GLM submodels. That is, within
+#'   a grouping factor (for example, patient ID) the group-specific terms are
+#'   assumed to be correlated across the different GLM submodels. It is 
+#'   possible to specify a different outcome type (for example a different
+#'   family and/or link function) for each of the GLM submodels, by providing
+#'   a list of \code{\link[stats]{family}} objects in the \code{family} 
+#'   argument. \cr
 #'   \cr
 #'   For the event submodel a parametric
 #'   proportional hazards model is assumed. The baseline hazard can be estimated 
