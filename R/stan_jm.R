@@ -75,12 +75,11 @@
 #'   will fit a joint model with no association structure (equivalent  
 #'   to fitting separate longitudinal and time-to-event models). It is also 
 #'   possible to include interaction terms between the association term 
-#'   ("etavalue", "etaslope", "etalag", "etaauc, "muvalue", "muslope", "mulag",
-#'   or "muauc") with observed data/covariates. It is also possible, when fitting 
-#'   a multivariate joint model, to include interaction terms between the 
-#'   association terms ("etavalue" or "muvalue") corresponding to the different
-#'   longitudinal outcomes. See the \strong{Details} section as well as the
-#'   \strong{Examples} below.
+#'   ("etavalue", "etaslope", "muvalue", "muslope") and observed data/covariates. 
+#'   It is also possible, when fitting a multivariate joint model, to include 
+#'   interaction terms between the association terms ("etavalue" or "muvalue") 
+#'   corresponding to the different longitudinal outcomes. See the 
+#'   \strong{Details} section as well as the \strong{Examples} below.
 #' @param basehaz A character string indicating which baseline hazard to use
 #'   for the event submodel. Options are a Weibull baseline hazard
 #'   (\code{"weibull"}, the default), a B-splines approximation estimated 
@@ -278,7 +277,28 @@
 #'   By default, \code{"shared_b"} and \code{"shared_coef"} contribute all 
 #'   random effects to the association structure; however, a subset of the random effects can 
 #'   be chosen by specifying their indices between parentheses as a suffix, for 
-#'   example, "shared_b(1)" or "shared_b(1:3)" or "shared_b(1,2,4)", and so on. \cr
+#'   example, "shared_b(1)" or "shared_b(1:3)" or "shared_b(1,2,4)", and so on. 
+#'   In addition, several association terms (\code{"etavalue"}, \code{"etaslope"},
+#'   \code{"muvalue"}, and \code{"muslope"}) can be interacted with observed 
+#'   data/covariates. To do this, use the association terms main handle plus a
+#'   suffix of \code{"_data"} then followed by the model matrix formula in 
+#'   parentheses. For example if we had a variable in our dataset for gender 
+#'   named \code{sex} then we might want to obtain different estimates for the 
+#'   association between the current slope of the marker and the risk of the 
+#'   event for each gender. To do this we would specify 
+#'   \code{assoc = "etaslope_data(~ sex)"}. It is also possible, when fitting 
+#'   a multivariate joint model, to include interaction terms between the 
+#'   association terms themselves ("etavalue" or "muvalue"). For example, if
+#'   we had a joint model with two longitudinal markers, we could specify 
+#'   \code{assoc = list(c("etavalue", "etavalue_etavalue(2)"), "etavalue")}.
+#'   The first element of list says we want to use the value of the linear
+#'   predictor for the first marker, as well as it's interaction with the
+#'   value of the linear predictor for the second marker. The second element of 
+#'   the list says we want to also include the expected value of the second marker 
+#'   (i.e. as a "main effect"). Therefore, the linear predictor for the event 
+#'   submodel would include the "main effects" for each marker as well as their
+#'   interaction. There are additional examples in the \strong{Examples} section 
+#'   below. \cr
 #'   \cr
 #'   Time-varying covariates are allowed in both the 
 #'   longitudinal and event submodels. These should be specified in the data 
@@ -366,9 +386,10 @@
 #' ######
 #' # Multivariate joint model, estimated using multiple MCMC chains 
 #' # run in parallel across all available PC cores
-#' mv2 <- stan_jm(formulaLong = list(
-#'         logBili ~ year + (1 | id), 
-#'         albumin ~ sex + year + (1 +  year | id)),
+#' mv2 <- stan_jm(
+#'         formulaLong = list(
+#'           logBili ~ year + (1 | id), 
+#'           albumin ~ sex + year + (1 + year | id)),
 #'         dataLong = pbcLong_subset,
 #'         formulaEvent = Surv(futimeYears, death) ~ sex + trt, 
 #'         dataEvent = pbcSurv_subset,
@@ -403,10 +424,28 @@
 #'               dataLong = pbcLong_subset,
 #'               formulaEvent = Surv(futimeYears, death) ~ sex + trt, 
 #'               dataEvent = pbcSurv_subset,
-#'               time_var = "year",
+#'               time_var = "year", chains = 1,
 #'               assoc = c("etavalue", "etavalue_data(~ trt)"))
 #' summary(f4)  
-#'                     
+#' 
+#' ######
+#' # Here we provide an example of a multivariate joint model, where the
+#' # association structure is formed by including the expected value of 
+#' # each marker (logBili and albumin) in the linear predictor of the event
+#' # submodel, as well as their interaction effect. (Noting that whether an  
+#' # association structure based on a marker by marker interaction term makes 
+#' # sense will depend on the context of your application -- here we just show
+#' # it for demostration purposes).
+#' mv3 <- stan_jm(
+#'         formulaLong = list(
+#'           logBili ~ year + (1 | id), 
+#'           albumin ~ sex + year + (1 + year | id)),
+#'         dataLong = pbcLong_subset,
+#'         formulaEvent = Surv(futimeYears, death) ~ sex + trt, 
+#'         dataEvent = pbcSurv_subset,
+#'         time_var = "year", chains = 1,
+#'         assoc = list(c("etavalue", "etavalue_etavalue(2)"), "etavalue))
+#'                                                             
 #' }
 #' 
 #' @import data.table
