@@ -1005,7 +1005,7 @@ stan_jm <- function(formulaLong, dataLong, formulaEvent, dataEvent, time_var,
   # Initial values
   #================
   
-  if (init == "model_based")
+  if (is.character(init) && (init == "model_based"))
     init <- generate_init_function(y_mod_stuff, e_mod_stuff, standata)
 
   #===========
@@ -2778,7 +2778,7 @@ set_sampling_args_for_jm <- function(object, user_dots = list(),
          "determining the default adapt_delta")
   
   default_adapt_delta <- if (sum_p > 2) 0.85 else 0.80
-  default_max_treedepth <- 10L
+  default_max_treedepth <- 11L
   
   if (!is.null(user_adapt_delta))
     args$control$adapt_delta <- user_adapt_delta else 
@@ -2791,7 +2791,7 @@ set_sampling_args_for_jm <- function(object, user_dots = list(),
         args$control$max_treedepth <- default_max_treedepth
   
   if (!"iter" %in% unms) args$iter <- 1000
-  if (!"chains" %in% unms) args$chains <- 1
+  if (!"chains" %in% unms) args$chains <- 3
   if (!"refresh" %in% unms) args$refresh <- args$iter / 25
   if (!"save_warmup" %in% unms) args$save_warmup <- TRUE  
   
