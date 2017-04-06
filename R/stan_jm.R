@@ -829,7 +829,7 @@ stan_jm <- function(formulaLong, dataLong, formulaEvent, dataEvent, time_var,
   standata$weights <- 
     if (!is.null(weights)) as.array(unlist(weights)) else as.array(numeric(0))
   standata$offset  <- 
-    if (!is.null(offset)) stop("bug found. offset not yet implemented.") else double(0)
+    if (!is.null(offset)) stop("Bug found: offset not yet implemented.") else double(0)
   standata$link    <- as.array(link)
   standata$dense_X <- !sparse
   standata$special_case <- as.integer(FALSE)
@@ -984,58 +984,78 @@ stan_jm <- function(formulaLong, dataLong, formulaEvent, dataEvent, time_var,
     
   standata$assoc <- as.integer(a_K > 0L) # any association structure, 1 = yes
 
+  value <- function(lag = 0, mu = FALSE, formula = NULL, interactions = NULL) {
+    if (!any(is.null(formula), is.formula(formula)))
+      stop("'formula' should be NULL or a formula.")
+    nm <- paste0(if (mu) "mu" else "eta", "value", if (lag > 0) "_lag")
+    nlist(type = "value", nm, lag, mu, formula, interactions)
+  }
+  
   # Indicator for which components are required to build the association terms
   standata$assoc_uses <- sapply(
-    c("etavalue", "etaslope", "etalag", "etaauc", "muvalue", "muslope", "mulag", "muauc"), 
+    c("value", "slope", "auc", "muvalue", "muslope", "muauc"), 
     function(x, assoc) {
-      nm_check <- switch(x,
-                         etavalue = "^eta|^mu",
-                         etaslope = "etaslope|muslope",
-                         etalag   = "etalag|mulag",
-                         etaauc   = "etaauc|muauc",
-                         muvalue  = "muvalue|muslope",
-                         muslope  = "muslope",
-                         mulag    = "mulag",
-                         muauc    = "muauc")
-      sel <- grep(nm_check, rownames(assoc))
+      sel <- grep(x, rownames(assoc))
       as.integer(any(unlist(assoc[sel,])))
     }, assoc = assoc)  
     
   # Indexing for desired association types
   # !!! must be careful with corresponding use of indexing in Stan code
-  # 1 = ev; 2 = es; 3 = el; 4 = ea; 5 = mv; 6 = ms; 7 = ml; 8 = ma;
+  # 1 = ev; 2 = es; 3 = ea; 5 = mv; 6 = ms; 7 = ml; 8 = ma;
   # 9 = shared_b; 10 = shared_coef;
   # 11 = ev_data; 12 = es_data; 13 = mv_data; 14 = ms_data;
   # 15 = evev; 16 = evmv; 17 = mvev; 18 = mvmv;
   sel <- grep("which|null", rownames(assoc), invert = TRUE)
   standata$has_assoc <- matrix(as.integer(assoc[sel,]), ncol = M) 
   
-  # Data for calculating eta, eta slope, eta lag, eta auc in GK quadrature 
-  for (i in c("eta", "eps", "lag", "auc")) {
-    nm_check <- switch(i,
-                       eta = "^eta|^mu",
-                       eps = "slope",
-                       lag = "etalag|mulag",
-                       auc = "auc")
-    sel <- grep(nm_check, rownames(assoc))
+  # Data for calculating value, slope or auc in GK quadrature
+  for (i in c("value", "slope", "auc")) {
+    sel <- grep(i, rownames(assoc))
     if (any(unlist(assoc[sel,]))) {
       tmp_stuff <- fetch(a_mod_stuff, paste0("mod_", i))
-      X_tmp <- as.matrix(Matrix::bdiag(fetch(tmp_stuff, "xtemp")))
       group_tmp <- lapply(tmp_stuff, function(x) {
         pad_reTrms(Ztlist = x[["group"]][["Ztlist"]], 
                    cnms   = x[["group"]][["cnms"]], 
                    flist  = x[["group"]][["flist"]])})
-      Z_tmp <- Matrix::bdiag(fetch(group_tmp, "Z"))      
+      Z_tmp <- Matrix::bdiag(fetch(group_tmp, "Z"))
+      X_tmp <- as.matrix(Matrix::bdiag(fetch(tmp_stuff, "xtemp")))
+      U_tmp <- t(do.call("cbind", fetch(tmp_stuff, "xmat_data")))
+      K_tmp <- fetch_array(tmp_stuff, "K_data")
+      if (i == "slope") {
+        group_eps <- lapply(tmp_stuff, function(x) {
+          pad_reTrms(Ztlist = x[["group_eps"]][["Ztlist"]], 
+                     cnms   = x[["group_eps"]][["cnms"]], 
+                     flist  = x[["group_eps"]][["flist"]])})
+        Z_eps <- Matrix::bdiag(fetch(group_eps, "Z"))        
+        X_eps <- as.matrix(Matrix::bdiag(fetch(tmp_stuff, "xtemp_eps")))
+      }
     } else {
       X_tmp <- matrix(0,0,standata$K)
-      Z_tmp <- matrix(0,0,0) 
+      Z_tmp <- matrix(0,0,0)
+      U_tmp <- matrix(0,0,0)
+      K_tmp <- rep(0L, M)
+      if (i == "slope") {
+        X_eps <- matrix(0,0,standata$K)
+        Z_eps <- matrix(0,0,0)
+      }
     }
     parts_Z_tmp <- rstan::extract_sparse_parts(Z_tmp)
-    standata[[paste0("y_Xq_", i)]] <- as.array(X_tmp)
-    standata[[paste0("nnz_Zq_", i)]] <- as.integer(length(parts_Z_tmp$w))
-    standata[[paste0("w_Zq_", i)]] <- parts_Z_tmp$w
-    standata[[paste0("v_Zq_", i)]] <- parts_Z_tmp$v
-    standata[[paste0("u_Zq_", i)]] <- as.array(parts_Z_tmp$u)    
+    standata[[paste0(i, "_nnz_Zq")]] <- as.integer(length(parts_Z_tmp$w))
+    standata[[paste0(i, "_w_Zq")]] <- parts_Z_tmp$w
+    standata[[paste0(i, "_v_Zq")]] <- parts_Z_tmp$v
+    standata[[paste0(i, "_u_Zq")]] <- as.array(parts_Z_tmp$u)    
+    standata[[paste0(i, "_y_Xq")]] <- as.array(X_tmp) 
+    standata[[paste0(i, "_y_Uq")]] <- as.array(U_tmp)
+    standata[[paste0(i, "_y_Kq")]] <- as.array(K_tmp)
+    standata[[paste0(i, "_use_invlink")]] <- as.array(as.integer())
+    if (i == "slope") {
+      parts_Z_eps <- rstan::extract_sparse_parts(Z_eps)
+      standata[[paste0(i, "_nnz_Zq_eps")]] <- as.integer(length(parts_Z_eps$w))
+      standata[[paste0(i, "_w_Zq_eps")]] <- parts_Z_eps$w
+      standata[[paste0(i, "_v_Zq_eps")]] <- parts_Z_eps$v
+      standata[[paste0(i, "_u_Zq_eps")]] <- as.array(parts_Z_eps$u)        
+      standata[[paste0(i, "_y_Xq_eps")]] <- as.array(X_eps)
+    }
   }  
   
   # Data for auc association structure
@@ -1051,14 +1071,6 @@ stan_jm <- function(formulaLong, dataLong, formulaEvent, dataEvent, time_var,
         lapply(get_quadpoints(auc_quadnodes)$weights, unstandardise_quadweights, 0, y)))) 
   standata$auc_quadweights <- 
     if (standata$assoc_uses[4]) as.array(auc_quadweights) else double(0)
-
-  # Interactions between association terms and data
-  # design matrix for the interactions
-  standata$y_Xq_data <- 
-    as.array(t(as.matrix(do.call("cbind", fetch(a_mod_stuff, "xmat_data")))))
-  # number of columns in y_Xq_data corresponding to each interaction type 
-  # (ie, etavalue, etaslope, muvalue, muslope) for each submodel
-  standata$a_K_data  <- fetch_array(a_mod_stuff, "K_data")  
   
   # Interactions between association terms
   standata$which_interactions      <- as.array(unlist(assoc["which_interactions",]))
