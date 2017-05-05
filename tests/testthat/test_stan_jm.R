@@ -31,12 +31,20 @@ if (interactive()) options(mc.cores = parallel::detectCores())
 TOLSCALE_lmer  <- 0.2 # how many SEs can stan_jm fixefs be from lmer fixefs
 TOLSCALE_glmer <- 0.3 # how many SEs can stan_jm fixefs be from glmer fixefs
 TOLSCALE_event <- 0.2 # how many SEs can stan_jm fixefs be from coxph fixefs
+TOLSCALE_jms <- 0.2 # how many SEs can stan_jm fixefs/ses be from JM fixefs
 FIXEF_tol <- 0.02
 RANEF_tol <- 0.05
 EVENT_tol <- 0.05
+PP_tol <- 0.3
+PPMEANS_tol <- 0.05
 
 expect_stanreg <- function(x) expect_s3_class(x, "stanreg")
+expect_stanjm  <- function(x) expect_s3_class(x, "stanjm")
 SW <- function(expr) capture.output(suppressWarnings(expr))
+colMedians <- function(x) apply(x, 2L, median)
+colSds <- function(x) apply(x, 2L, sd)
+colLower <- function(x) apply(x, 2L, quantile, 0.025)
+colUpper <- function(x) apply(x, 2L, quantile, 0.975)
 
 context("stan_jm")
 
@@ -84,8 +92,26 @@ examplejm4 <-
 
 #--------  Tests
 
-test_that("formula argument works", {
-  
+fmL1 <- logBili ~ year + (1 | id)
+fmL2 <- exp(logBili) ~ year + (1 | id)
+fmL3 <- logBili ~ I(year / 2) + (1 | id)
+fmL4 <- logBili ~ poly(year, degree = 2) + (1 | id)
+fmS1  <- Surv(futimeYears, death) ~ sex + trt
+fmS2  <- Surv(futimeYears, death) ~ sex + I(trt / 2)
+test_that("formula argument works, including evaluation of transformations", {
+  expect_stanjm(stan_jm(logBili ~ year + (1 | id), pbcLong, 
+                        Surv(futimeYears, death) ~ sex + trt, pbcSurv, 
+                        time_var = "year", iter = 1, chains = CHAINS, seed = SEED))
+  expect_stanjm(stan_jm(fmL1, pbcLong, fmS1, pbcSurv, time_var = "year",
+                        iter = 1, chains = CHAINS, seed = SEED)) 
+  expect_stanjm(stan_jm(fmL2, pbcLong, fmS1, pbcSurv, time_var = "year",
+                        iter = 1, chains = CHAINS, seed = SEED)) 
+  expect_stanjm(stan_jm(fmL3, pbcLong, fmS1, pbcSurv, time_var = "year",
+                        iter = 1, chains = CHAINS, seed = SEED)) 
+  expect_stanjm(stan_jm(fmL4, pbcLong, fmS1, pbcSurv, time_var = "year",
+                        iter = 1, chains = CHAINS, seed = SEED))   
+  expect_stanjm(stan_jm(fmL1, pbcLong, fmS2, pbcSurv, time_var = "year",
+                        iter = 1, chains = CHAINS, seed = SEED))  
 })
 
 
@@ -114,7 +140,7 @@ test_that("id_var argument works", {
 
 
 test_that("family argument works", {
-  
+  # not checked here, since can be checked when comparing stan_jm and stan_glmer below
 })
 
 
@@ -296,6 +322,17 @@ test_that("QR argument works", {
 
 if (interactive()) {
 
+  pbcLong$ybino_successes <- as.integer(cut(pbcLong$logBili, 6))
+  pbcLong$ybino_failures  <- 6 - as.integer(cut(pbcLong$logBili, 6)) 
+  pbcLong$ybino_trials    <- rep_len(6, length(pbcLong$ybino_successes))
+  pbcLong$ybino_prop      <- pbcLong$ybino_successes / pbcLong$ybino_trials
+  pbcLong$ybern <- as.integer(pbcLong$logBili >= mean(pbcLong$logBili))
+  pbcLong$ypois <- as.integer(pbcLong$albumin)
+  pbcLong$ygamm <- as.integer(pbcLong$platelet)
+  pbcLong$xbern <- as.numeric(pbcLong$platelet / 100)
+  pbcLong$xpois <- as.numeric(pbcLong$platelet / 100)
+  pbcLong$xgamm <- as.numeric(pbcLong$logBili)
+  
   compare_lmer <- function(fm) {
     y1 <- stan_lmer(fm, pbcLong, iter = 2000, chains = CHAINS, seed = SEED)
     s1 <- coxph(Surv(futimeYears, death) ~ sex + trt, data = pbcSurv)
@@ -312,47 +349,74 @@ if (interactive()) {
   }  
     
   compare_glmer <- function(fm, fam) {
-    y1 <- stan_glmer(fm, pbcLong, fam, iter = 2000, chains = CHAINS, seed = SEED)
-    s1 <- coxph(Surv(futimeYears, death) ~ sex + trt, data = pbcSurv)
-    j1 <- stan_jm(fm, pbcLong, Surv(futimeYears, death) ~ sex + trt, pbcSurv,
-                  time_var = "year", assoc = NULL, family = fam,
-                  iter = 2000, chains = CHAINS, seed = SEED)
+    SW(y1 <- stan_glmer(fm, pbcLong, fam, iter = 2000, chains = CHAINS, seed = SEED))
+    SW(s1 <- coxph(Surv(futimeYears, death) ~ sex + trt, data = pbcSurv))
+    SW(j1 <- stan_jm(fm, pbcLong, Surv(futimeYears, death) ~ sex + trt, pbcSurv,
+                     time_var = "year", assoc = NULL, family = fam,
+                     iter = 2000, chains = CHAINS, seed = SEED))
+    
+    # check parameter estimates
     expect_equal(ranef(y1), ranef(j1)$Long1, tol = RANEF_tol)
     tols <- TOLSCALE_glmer * y1$ses
     for (i in 1:length(fixef(y1)))
       expect_equal(fixef(y1)[[i]], fixef(j1)$Long1[[i]], tol = tols[[i]])
     tols <- TOLSCALE_event * summary(s1)$coefficients[, "se(coef)"]
     for (i in 1:length(coef(s1)))
-      expect_equal(coef(s1)[[i]], fixef(j1)$Event[[i+1]], tol = tols[[i]])       
+      expect_equal(coef(s1)[[i]], fixef(j1)$Event[[i+1]], tol = tols[[i]])
+    # check posterior_predict - in sample
+    y1pp1 <- posterior_predict(y1, seed = SEED)
+    j1pp1 <- posterior_predict(j1, seed = SEED, m = 1)
+    expect_equal(y1pp1, j1pp1, tol = PP_tol)
+    expect_equal(colMeans(y1pp1), colMeans(j1pp1), tol = PPMEANS_tol)
+    expect_equal(colSds(y1pp1), colSds(j1pp1), tol = PPMEANS_tol)
+    # check posterior_predict - new data
+    y1pp2 <- posterior_predict(y1, newdata = pbcLong[1:10,], seed = SEED)
+    j1pp2 <- posterior_predict(j1, newdata = pbcLong[1:10,], seed = SEED, m = 1)
+    expect_equal(y1pp2, j1pp2, tol = PP_tol)
+    expect_equal(colMeans(y1pp2), colMeans(j1pp2), tol = PPMEANS_tol)
+    expect_equal(colSds(y1pp2), colSds(j1pp2), tol = PPMEANS_tol)
+    # check posterior_predict - new data with new levels
+    nd <- pbcLong[1:10,]
+    nd$id <- paste0("new", nd$id)
+    y1pp3 <- posterior_predict(y1, newdata = nd, seed = SEED)
+    j1pp3 <- posterior_predict(j1, newdata = nd, seed = SEED, m = 1)   
+    expect_equal(colMeans(y1pp3), colMeans(j1pp3), tol = PPMEANS_tol)
+    expect_equal(colSds(y1pp3), colSds(j1pp3), tol = PPMEANS_tol)
+    # check posterior_traj without interpolation
+    nd <- pbcLong[pbcLong$id == 2, ]
+    j1pp4 <- posterior_predict(j1, newdata = nd, seed = SEED, m = 1)
+    j1pt4 <- posterior_traj(j1, newdata = nd, seed = SEED, return_matrix = TRUE,
+                           interpolate = FALSE, extrapolate = FALSE)
+    expect_identical(j1pp4, j1pt4)
+    # check posterior_traj with interpolation
+    nd <- pbcLong[pbcLong$id == 2, ]
+    nd$year <- (0:8 / 8) * 10 # create exact interpolation times for posterior_predict
+    j1pp5 <- posterior_predict(j1, newdata = nd, seed = SEED, m = 1)
+    y1pt5 <- posterior_traj(j1, newdata = nd, seed = SEED, control = list(ipoints = 9))
+    expect_equal(colMedians(j1pp5), y1pt5$yfit, tol = PPMEANS_tol) # not exactly equal because yfit is median of predicted mu, not predicted y
+    expect_equal(colLower(j1pp5), y1pt5$pi_lb) # should be exactly equal, since pi_lb based on predicted y
+    expect_equal(colUpper(j1pp5), y1pt5$pi_ub) # should be exactly equal, since pi_ub based on predicted y
   } 
-  
-  pbcLong$ybino_successes <- as.integer(cut(pbcLong$logBili, 6))
-  pbcLong$ybino_failures  <- 6 - as.integer(cut(pbcLong$logBili, 6)) 
-  pbcLong$ybino_trials    <- rep_len(6, length(pbcLong$ybino_successes))
-  pbcLong$ybino_prop      <- pbcLong$ybino_successes / pbcLong$ybino_trials
-  pbcLong$ybern <- as.integer(pbcLong$logBili >= mean(pbcLong$logBili))
-  pbcLong$ypois <- as.integer(pbcLong$albumin)
-  pbcLong$ygamm <- as.integer(pbcLong$platelet)
-  pbcLong$xbern <- as.numeric(pbcLong$platelet / 100)
-  pbcLong$xpois <- as.numeric(pbcLong$platelet / 100)
-  pbcLong$xgamm <- as.numeric(pbcLong$logBili)
- 
+
   test_that("coefs same for stan_jm and stan_lmer/coxph", {
-    compare_lmer(logBili ~ year + (1 | id))})
-  test_that("coefs same for stan_jm and stan_glmer, binomial as cbind(success, failure)", {
+    compare_lmer(logBili ~ year + (1 | id))})  
+  
+  test_that("stan_jm/stan_glmer parameter estimates and predictions are the same, gaussian", {
+    compare_glmer(logBili ~ year + (1 | id), gaussian)})  
+  test_that("stan_jm/stan_glmer parameter estimates and predictions are the same, binomial as cbind(success, failure)", {
     compare_glmer(cbind(ybino_successes, ybino_failures) ~ year + xbern + (1 | id), binomial)})
-  test_that("coefs same for stan_jm and stan_glmer, binomial as cbind(success, trials-success)", {
+  test_that("stan_jm/stan_glmer parameter estimates and predictions are the same, binomial as cbind(success, trials-success)", {
     compare_glmer(cbind(ybino_successes, ybino_trials - ybino_successes) ~ year + xbern + (1 | id), binomial)})
-  test_that("coefs same for stan_jm and stan_glmer, bernoulli", {
+  test_that("stan_jm/stan_glmer parameter estimates and predictions are the same, bernoulli", {
     compare_glmer(ybern ~ year + xbern + (1 | id), binomial)})
-  test_that("coefs same for stan_jm and stan_glmer, poisson", {
+  test_that("stan_jm/stan_glmer parameter estimates and predictions are the same, poisson", {
     compare_glmer(ypois ~ year + xpois + (1 | id), poisson)})
-  test_that("coefs same for stan_jm and stan_glmer, negative binomial", {
+  test_that("stan_jm/stan_glmer parameter estimates and predictions are the same, negative binomial", {
     compare_glmer(ypois ~ year + xpois + (1 | id), neg_binomial_2)})
-  #test_that("coefs same for stan_jm and stan_glmer, Gamma", {
-    #compare_glmer(ygamm ~ year + xgamm + (1 | id), Gamma)})
-  #test_that("coefs same for stan_jm and stan_glmer, inverse gaussian", {
-    #compare_glmer(ygamm ~ year + xgamm + (1 | id), inverse.gaussian)})
+  #test_that("stan_jm/stan_glmer parameter estimates and predictions are the same, Gamma", {
+  #compare_glmer(ygamm ~ year + xgamm + (1 | id), Gamma)})
+  #test_that("stan_jm/stan_glmer parameter estimates and predictions are the same, inverse gaussian", {
+  #compare_glmer(ygamm ~ year + xgamm + (1 | id), inverse.gaussian)})  
 
   test_that("coefs same for stan_jm and stan_glmer, binomial as prop as outcome and trials as weights", {
     jm_weights <- data.frame(id = pbcLong$id, weights = pbcLong$ybino_trials)
@@ -372,6 +436,124 @@ if (interactive()) {
     for (i in 1:length(coef(s1)))
       expect_equal(coef(s1)[[i]], fixef(j1)$Event[[i+1]], tol = tols[[i]])       
   })  
+
+  test_that("coefs same for stan_jm and JM, linear trajectory", {
+    fmL1 <- logBili ~ year + (year | id)
+    fmS1 <- Surv(futimeYears, death) ~ 1
+    j1 <- SW(stan_jm(fmL1, pbcLong, fmS1, pbcSurv, time_var = "year", assoc = "etavalue", 
+                  iter = 1000, chains = CHAINS, seed = SEED))
+    l1 <- nlme::lme(logBili ~ year, random = ~ year | id, pbcLong)
+    s1 <- coxph(fmS1, pbcSurv, x = TRUE, model = TRUE)  
+    m1 <- JM::jointModel(l1, s1, timeVar = "year")
+    # compare estimates and SEs for longitudinal submodel
+    estL <- summary(m1)[["CoefTable-Long"]][, "Value"]
+    sesL <- summary(m1)[["CoefTable-Long"]][, "Std.Err"]
+    tols <- TOLSCALE_jms * sesL
+    expect_equal(estL, fixef(j1)$Long1, check.attributes = FALSE, tol = tols)
+    # compare estimates and SEs for event submodel
+    estE <- summary(m1)[["CoefTable-Event"]][, "Value"]
+    sesE <- summary(m1)[["CoefTable-Event"]][, "Std.Err"]
+    tols <- TOLSCALE_jms * sesE
+    expect_equal(estE[-length(estE)], fixef(j1)$Event, check.attributes = FALSE,
+                 tol = tols[-length(estE)]) # the -length(estE) removes log(shape)
+    expect_equal(sesE[-length(estE)], se(j1)$Event, check.attributes = FALSE,
+                 tol = tols[-length(estE)]) # the -length(estE) removes log(shape)
+    # compare estimate for log(shape)
+    stan_logshape <- log(summary(j1, pars = "Event|weibull-shape")[,1])
+    expect_equal(as.vector(estE[length(estE)]), stan_logshape, tol = tols[length(estE)])
+  })
   
+  test_that("coefs same for stan_jm and JM, raw polynomial trajectory", {
+    fmL1 <- logBili ~ poly(year, degree = 2, raw = TRUE) + (poly(year, degree = 2, raw = TRUE) | id)
+    fmS1 <- Surv(futimeYears, death) ~ 1
+    SW(j1 <- stan_jm(fmL1, pbcLong, fmS1, pbcSurv, time_var = "year", assoc = "etavalue", 
+                  iter = 1000, chains = CHAINS, seed = SEED))
+    l1 <- nlme::lme(logBili ~ poly(year, degree = 2, raw = TRUE), 
+                    random = ~ poly(year, degree = 2, raw = TRUE) | id, pbcLong)
+    s1 <- coxph(fmS1, pbcSurv, x = TRUE, model = TRUE)  
+    m1 <- JM::jointModel(l1, s1, timeVar = "year")
+    # compare estimates and SEs for longitudinal submodel
+    estL <- summary(m1)[["CoefTable-Long"]][, "Value"]
+    sesL <- summary(m1)[["CoefTable-Long"]][, "Std.Err"]
+    tols <- TOLSCALE_jms * sesL
+    expect_equal(estL, fixef(j1)$Long1, check.attributes = FALSE, tol = tols)
+    # compare estimates and SEs for event submodel
+    estE <- summary(m1)[["CoefTable-Event"]][, "Value"]
+    sesE <- summary(m1)[["CoefTable-Event"]][, "Std.Err"]
+    tols <- TOLSCALE_jms * sesE
+    expect_equal(estE[-length(estE)], fixef(j1)$Event, check.attributes = FALSE,
+                 tol = tols[-length(estE)]) # the -length(estE) removes log(shape)
+    expect_equal(sesE[-length(estE)], se(j1)$Event, check.attributes = FALSE,
+                 tol = tols[-length(estE)]) # the -length(estE) removes log(shape)
+    # compare estimate for log(shape)
+    stan_logshape <- log(summary(j1, pars = "Event|weibull-shape")[,1])
+    expect_equal(as.vector(estE[length(estE)]), stan_logshape, tol = tols[length(estE)])
+  })  
+ 
+  test_that("coefs same for stan_jm and JM, orthogonalised polynomial trajectory", {
+    fmL1 <- logBili ~ poly(year, degree = 2) + (poly(year, degree = 2) | id)
+    fmS1 <- Surv(futimeYears, death) ~ 1
+    j1 <- SW(stan_jm(fmL1, pbcLong, fmS1, pbcSurv, time_var = "year", assoc = "etavalue", 
+                  iter = 1000, chains = CHAINS, seed = SEED))
+    l1 <- nlme::lme(logBili ~ poly(year, degree = 2), 
+                    random = ~ poly(year, degree = 2) | id, pbcLong)
+    s1 <- coxph(fmS1, pbcSurv, x = TRUE, model = TRUE)  
+    m1 <- JM::jointModel(l1, s1, timeVar = "year")
+    # compare estimates and SEs for longitudinal submodel
+    estL <- summary(m1)[["CoefTable-Long"]][, "Value"]
+    sesL <- summary(m1)[["CoefTable-Long"]][, "Std.Err"]
+    tols <- TOLSCALE_jms * sesL
+    expect_equal(estL, fixef(j1)$Long1, check.attributes = FALSE, tol = tols)
+    # compare estimates and SEs for event submodel
+    estE <- summary(m1)[["CoefTable-Event"]][, "Value"]
+    sesE <- summary(m1)[["CoefTable-Event"]][, "Std.Err"]
+    tols <- TOLSCALE_jms * sesE
+    expect_equal(estE[-length(estE)], fixef(j1)$Event, check.attributes = FALSE,
+                 tol = tols[-length(estE)]) # the -length(estE) removes log(shape)
+    expect_equal(sesE[-length(estE)], se(j1)$Event, check.attributes = FALSE,
+                 tol = tols[-length(estE)]) # the -length(estE) removes log(shape)
+    # compare estimate for log(shape)
+    stan_logshape <- log(summary(j1, pars = "Event|weibull-shape")[,1])
+    expect_equal(as.vector(estE[length(estE)]), stan_logshape, tol = tols[length(estE)])
+  })    
+  
+  
+  
+   
+ compare_jm <- function(fm, fmFixed, fmRandom) {
+   fmS1 <- Surv(futimeYears, death) ~ 1
+   SW(j1 <- stan_jm(fm, pbcLong, fmS1, pbcSurv, time_var = "year", assoc = "etavalue", 
+                 iter = 1000, chains = CHAINS, seed = SEED))
+   l1 <- nlme::lme(fmFixed, random = fmRandom, pbcLong)
+   s1 <- coxph(fmS1, pbcSurv, x = TRUE, model = TRUE)  
+   m1 <- JM::jointModel(l1, s1, timeVar = "year")
+   # compare estimates and SEs for longitudinal submodel
+   estL <- summary(m1)[["CoefTable-Long"]][, "Value"]
+   sesL <- summary(m1)[["CoefTable-Long"]][, "Std.Err"]
+   tols <- TOLSCALE_jms * sesL
+   expect_equal(estL, fixef(j1)$Long1, check.attributes = FALSE, tol = tols)
+   # compare estimates and SEs for event submodel
+   estE <- summary(m1)[["CoefTable-Event"]][, "Value"]
+   sesE <- summary(m1)[["CoefTable-Event"]][, "Std.Err"]
+   tols <- TOLSCALE_jms * sesE
+   expect_equal(estE[-length(estE)], fixef(j1)$Event, check.attributes = FALSE,
+                tol = tols[-length(estE)]) # the -length(estE) removes log(shape)
+   expect_equal(sesE[-length(estE)], se(j1)$Event, check.attributes = FALSE,
+                tol = tols[-length(estE)]) # the -length(estE) removes log(shape)
+   # compare estimate for log(shape)
+   stan_logshape <- log(summary(j1, pars = "Event|weibull-shape")[,1])
+   expect_equal(as.vector(estE[length(estE)]), stan_logshape, tol = tols[length(estE)])   
+ }
+
+ test_that("coefs same for stan_jm and JM, linear trajectory", {
+   compare_jm(logBili ~ year + (1 | id), logBili ~ year, ~ 1 | id)})
+ test_that("coefs same for stan_jm and JM, raw polynomial trajectory", {
+   compare_jm(logBili ~ poly(year, degree = 2, raw = TRUE) + (poly(year, degree = 2, raw = TRUE) | id), 
+              logBili ~ poly(year, degree = 2, raw = TRUE), ~ poly(year, degree = 2, raw = TRUE) | id)})
+ test_that("coefs same for stan_jm and JM, orthogonalised polynomial trajectory", {
+   compare_jm(logBili ~ year + (1 | id), logBili ~ year, ~ 1 | id)})
+ 
+  
+   
 }
 

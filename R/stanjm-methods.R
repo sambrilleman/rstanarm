@@ -141,7 +141,8 @@ residuals.stanjm <- function(object, m = NULL, ...) {
 #' @rdname stanjm-methods
 #' @export
 se.stanjm <- function(object, m = NULL, ...) {
-  if (is.null(m)) list_nms(object$ses) else object$ses[[m]]
+  M <- get_M(object)
+  if (is.null(m)) list_nms(object$ses, M) else object$ses[[m]]
 }
 
 #' @rdname stanjm-methods
