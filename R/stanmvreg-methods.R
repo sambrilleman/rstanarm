@@ -18,7 +18,7 @@
 
 #' Methods for stanmvreg objects
 #' 
-#' S3 methods for \link[=stanmvreg-object]{stanmvreg} objects. There are also 
+#' S3 methods for \link[=stanmvreg-objects]{stanmvreg} objects. There are also 
 #' several methods (listed in \strong{See Also}, below) with their own
 #' individual help pages. 
 #' The main difference between these methods and the 
@@ -29,9 +29,10 @@
 #' with each element of the list containing the result for one of the submodels.
 #' 
 #' @name stanmvreg-methods
-#' @aliases coef VarCorr fixef ranef ngrps sigma
 #' 
+#' @templateVar stanmvregArg object,x
 #' @templateVar mArg m
+#' @template args-stanmvreg-object
 #' @template args-m
 #' @template args-remove-stub
 #' @param ... Ignored, except by the \code{update} method. See
@@ -80,8 +81,7 @@
 #' 
 #' @seealso
 #' Other S3 methods for stanmvreg objects, which have separate documentation, 
-#' including \code{\link{as.matrix.stanmvreg}},  
-#' \code{\link{print.stanmvreg}}, and \code{\link{summary.stanmvreg}}.
+#' including \code{\link{print.stanmvreg}}, and \code{\link{summary.stanmvreg}}.
 #' 
 #' Also \code{\link{posterior_interval}} for an alternative to \code{confint}, 
 #' and \code{posterior_predict}, \code{posterior_traj} and 
@@ -92,7 +92,6 @@ NULL
 
 #' @rdname stanmvreg-methods
 #' @export
-#' @export coef
 #'    
 coef.stanmvreg <- function(object, m = NULL, ...) {
   M <- get_M(object)
@@ -104,27 +103,28 @@ coef.stanmvreg <- function(object, m = NULL, ...) {
   refnames <- lapply(ref, function(x) unlist(lapply(x, colnames)))
   missnames <- lapply(1:M, function(m) setdiff(refnames[[m]], names(fef[[m]])))
   nmiss <- sapply(missnames, length)
-  if (any(nmiss > 0)) for (m in 1:M) {
-    if (nmiss[m] > 0) {
-      fillvars <- setNames(data.frame(rbind(rep(0, nmiss[m]))), missnames[[m]])
-      fef[[m]] <- cbind(fillvars, fef[[m]])
+  if (any(nmiss > 0)) for (x in 1:M) {
+    if (nmiss[x] > 0) {
+      fillvars <- setNames(data.frame(rbind(rep(0, nmiss[x]))), missnames[[x]])
+      fef[[x]] <- cbind(fillvars, fef[[x]])
     }
   }
   val <- lapply(1:M, function(m) 
     lapply(ref[[m]], function(x) fef[[m]][rep.int(1L, nrow(x)), , drop = FALSE]))
-  for (m in 1:M) {  # loop over number of markers
-    for (i in seq(a = val[[m]])) {  # loop over number of grouping factors
-      refi <- ref[[m]][[i]]
-      row.names(val[[m]][[i]]) <- row.names(refi)
+  for (x in 1:M) {  # loop over number of markers
+    for (i in seq(a = val[[x]])) {  # loop over number of grouping factors
+      refi <- ref[[x]][[i]]
+      row.names(val[[x]][[i]]) <- row.names(refi)
       nmsi <- colnames(refi)
-      if (!all(nmsi %in% names(fef[[m]]))) 
+      if (!all(nmsi %in% names(fef[[x]]))) 
         stop("Unable to align random and fixed effects.", call. = FALSE)
       for (nm in nmsi) 
-        val[[m]][[i]][[nm]] <- val[[m]][[i]][[nm]] + refi[, nm]
+        val[[x]][[i]][[nm]] <- val[[x]][[i]][[nm]] + refi[, nm]
     }
   }
   val <- lapply(val, function(x) structure(x, class = "coef.mer"))
-  val <- c(val, fef[length(fef)])         
+  if (is.jm(object))
+    val <- c(val, list(fixef(object)$Event))        
   if (is.null(m)) list_nms(val, M, stub = get_stub(object)) else val[[m]]       
 }
 

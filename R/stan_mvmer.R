@@ -54,8 +54,8 @@
 #'   can be specified for each GLM submodel. 
 #' @param weights Same as in \code{\link[stats]{glm}},
 #'   except that when fitting a multivariate GLM and a list of data frames 
-#'   is provided in \code{data} then a corresponding list of subsets and weights 
-#'   must be provided in \code{subset} and \code{weights}. If weights are 
+#'   is provided in \code{data} then a corresponding list of weights 
+#'   must be provided. If weights are 
 #'   provided for one of the GLM submodels, then they must be provided for 
 #'   all GLM submodels.
 #' @param prior,prior_intercept,prior_aux Same as in \code{\link{stan_glmer}}
@@ -82,7 +82,7 @@
 #'   the priors distributions that are available for the covariance matrices, 
 #'   the regression coefficients and the intercept and auxiliary parameters.
 #'
-#' @return A \link[=stanmvreg-object]{stanmvreg} object is returned.
+#' @return A \link[=stanmvreg-objects]{stanmvreg} object is returned.
 #' 
 #' @seealso \code{\link{stan_glmer}}.
 #'    
@@ -302,6 +302,11 @@ stan_mvmer <- function(formula, data, family = gaussian,
   standata$N_real <- as.integer(sum(fetch_(y_mod_stuff, "real_N"))) 
   standata$N_int  <- as.integer(sum(fetch_(y_mod_stuff, "int_N")))
   standata$N01    <- as.array(t(sapply(fetch(y_mod_stuff, "N01"), cbind))) 
+  
+  # Not used
+  standata$K_smooth   <- 0L
+  standata$S          <- matrix(NA_real_, standata$N, 0L)
+  standata$smooth_map <- integer(0)  
   
   # Design matrices
   X <- as.matrix(Matrix::bdiag(fetch(y_mod_stuff, "xtemp")))
