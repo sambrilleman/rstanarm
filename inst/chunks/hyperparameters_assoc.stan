@@ -1,6 +1,6 @@
   // hyperparameter values are set to 0 if there is no prior
-  vector[a_K]          a_prior_mean;
-  vector<lower=0>[a_K] a_prior_scale;
-  vector<lower=0>[a_K] a_prior_df;
-  real<lower=0>        a_global_prior_scale; // for hs priors only
-  real<lower=0>        a_global_prior_df;  
+  vector[e_A]          e_prior_mean_for_assoc;
+  vector<lower=0>[e_A] e_prior_scale_for_assoc;
+  vector<lower=0>[e_A] e_prior_df_for_assoc;
+  real<lower=0>        e_global_prior_scale_for_assoc; // for hs priors only
+  real<lower=0>        e_global_prior_df_for_assoc;  

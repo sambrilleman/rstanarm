@@ -35,22 +35,29 @@ data {
   //   basehaz_{type,df,X}, nrow_e_Xq, e_{K,Xq,times,d,xbar,weights,weights_rep}  
   #include "data_event.stan"
 
-  // declares a_K, a_prior_dist, assoc, assoc_uses, has_assoc, {sum_}size_which_b, 
+  // declares e_prior_dist_for_{frailty,frscale}, r_prior_dist{_for_intercept,_for_aux}, 
+  //   r_basehaz_X, nrow_r_Xq, r_{K,Xq,times,d,xbar}  
+  #include "data_recur.stan"
+
+  // declares e_A, e_prior_dist_for_assoc, assoc, assoc_uses, has_assoc, {sum_}size_which_b, 
   //   which_b_zindex, {sum_}size_which_coef, which_coef_{zindex,xindex}, 
   //   {sum_}a_K_data, {sum_,sum_size_}which_interactions, y_Xq_{eta,eps,lag,auc,data},
   //   {nnz,w,v,u}_Zq_{eta,eps,lag,auc}, nrow_y_Xq, nrow_y_Xq_auc, 
   //   auc_quadnodes, auc_quadweights   
   #include "data_assoc.stan"
   
-  // declares {e_,a_}{prior_{mean, scale, df}, prior_{mean, scale, df}_for_intercept, 
-  //   prior_{mean, scale, df}_for_aux, global_prior_{df,scale}}
+  // declares {e_,r_}prior_{mean, scale, df}, {e_,r_}prior_{mean, scale, df}_for_intercept, 
+  //   {e_,r_}prior_{mean, scale, df}_for_aux, e_prior_{mean, scale, df}_for_{assoc,frailty,frscale},
+  //   {e_,r_}global_prior_{df,scale}
   #include "hyperparameters_mvglm.stan" // same as hyperparameters.stan, but arrays of size M
   #include "hyperparameters_event.stan" 
   #include "hyperparameters_assoc.stan" 
+  #include "hyperparameters_recur.stan" 
 }
 transformed data {
   int<lower=0> e_hs = get_nvars_for_hs(e_prior_dist);                 
-  int<lower=0> a_hs = get_nvars_for_hs(a_prior_dist);                 
+  int<lower=0> e_hs_for_assoc = get_nvars_for_hs(e_prior_dist_for_assoc);                 
+  int<lower=0> r_hs = get_nvars_for_hs(r_prior_dist);                 
   int<lower=1> V[special_case ? t : 0, N] = make_V(N, special_case ? t : 0, v);  // not used
   
   // declares poisson_max, hsM, idx_{global,local2,local4,mix,ool,noise}, 
@@ -69,23 +76,36 @@ parameters {
   #include "parameters_mvglm.stan"
   // declares e_{gamma,z_beta,aux_unscaled,global,local,mix,ool}  
   #include "parameters_event.stan"
-  // declares a_{z_beta,global,local,mix,ool}
+  // declares e_z_alpha, e_{global,local,mix,ool}_for_assoc
   #include "parameters_assoc.stan"  
+  // declares r_{z_beta,global,local,mix,ool}, e_z_fbeta
+  #include "parameters_recur.stan" 
 }
 transformed parameters { 
   // parameters for event submodel
   vector[e_K] e_beta;               // log hazard ratios
-  vector[a_K] a_beta;               // assoc params
+  vector[e_A] e_alpha;              // assoc params
   vector[basehaz_df] e_aux;         // basehaz params  
   #include "tparameters_mvglm.stan" // defines aux, beta, b{_not_by_model}, theta_L
   e_beta = generate_beta(e_z_beta, e_prior_dist, e_prior_mean, 
                          e_prior_scale, e_prior_df, e_global, e_local,
                          e_global_prior_scale, e_ool, e_mix);  
-  a_beta = generate_beta(a_z_beta, a_prior_dist, a_prior_mean, 
-                         a_prior_scale, a_prior_df, a_global, a_local,
-                         a_global_prior_scale, a_ool, a_mix);         
+  e_alpha = generate_beta(e_z_alpha, e_prior_dist_for_assoc, e_prior_mean_for_assoc, 
+                          e_prior_scale_for_assoc, e_prior_df_for_assoc, 
+                          e_global_for_assoc, e_local_for_assoc,
+                          e_global_prior_scale_for_assoc, e_ool_for_assoc, 
+                          e_mix_for_assoc);         
   e_aux  = generate_aux(e_aux_unscaled, e_prior_dist_for_aux,
                         e_prior_mean_for_aux, e_prior_scale_for_aux);
+  r_beta = generate_beta(r_z_beta, r_prior_dist, r_prior_mean, 
+                         r_prior_scale, r_prior_df, r_global, r_local,
+                         r_global_prior_scale, r_ool, r_mix);  
+  r_aux  = generate_aux(r_aux_unscaled, r_prior_dist_for_aux,
+                        r_prior_mean_for_aux, r_prior_scale_for_aux);
+  e_fbeta = generate_beta(e_z_fbeta, e_prior_dist_for_frscale, e_prior_mean_for_frscale, 
+                         e_prior_scale_for_frscale, e_prior_df_for_frscale);  
+  u = generate_beta(z_u, e_prior_dist_for_frailty, e_prior_mean_for_frailty, 
+                    e_prior_scale_for_frailty, e_prior_df_for_frailty);  
   if (t > 0) {
     theta_L = make_theta_L(len_theta_L, p, 1.0, tau, scale, zeta, rho, z_T);
     b_not_by_model = make_b(z_b, theta_L, p, l);
@@ -95,6 +115,7 @@ transformed parameters {
 }
 model {
   vector[nrow_e_Xq] e_eta_q; // eta for event submodel (at event and quad times)  
+  vector[nrow_r_Xq*has_recurrent] r_eta_q; // eta for recurrent event submodel (at event and quad times)  
 
   //---- Log-lik for longitudinal submodels
   
@@ -121,6 +142,9 @@ model {
   else e_eta_q = rep_vector(0.0, nrow_e_Xq);
   if (e_has_intercept == 1) e_eta_q = e_eta_q + e_gamma[1];
   else e_eta_q = e_eta_q + dot_product(e_xbar, e_beta);     
+  if (has_recurrent == 1) {
+    e_eta_q = e_eta_q + e_fbeta * 
+  }
   if (assoc == 1) { 
     // declares y_eta_q{_eps,_lag,_auc}, y_eta_qwide{_eps,_lag,_auc}, 
 	  //   y_q_wide{_eps,_lag,_auc}, mark{2,3}
@@ -132,6 +156,18 @@ model {
     // declares log_basehaz, ll_{haz_q,haz_eventtime,surv_eventtime,event}
 	  #include "event_lp.stan" // increments target with event log-lik
   }
+  
+  //----- Log-lik for recurrent event submodel (GK quadrature)
+  
+  // Recurrent event submodel: linear predictor at event and quad times
+  if (r_K > 0) r_eta_q = r_Xq * r_beta;
+  else r_eta_q = rep_vector(0.0, nrow_r_Xq);
+  if (r_has_intercept == 1) r_eta_q = r_eta_q + r_gamma[1];
+  else r_eta_q = r_eta_q + dot_product(r_xbar, r_beta);     
+  { 
+    // declares log_basehaz, ll_{haz_q,haz_eventtime,surv_eventtime,event}
+	  #include "recur_lp.stan" // increments target with event log-lik
+  }  
   
   //----- Log-priors
 

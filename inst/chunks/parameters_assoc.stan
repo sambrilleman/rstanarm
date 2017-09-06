@@ -1,7 +1,7 @@
-  vector[a_K] a_z_beta; // primitive assoc params
+  vector[e_A] e_z_alpha; // primitive assoc params
 
   // parameters for priors on assoc params 
-  real<lower=0> a_global[a_hs];
-  vector<lower=0>[(a_hs>0)*a_K] a_local[a_hs];
-  vector<lower=0>[a_K] a_mix[a_prior_dist == 5 || a_prior_dist == 6];
-  real<lower=0> a_ool[a_prior_dist == 6];
+  real<lower=0> e_global_for_assoc[e_hs_for_assoc];
+  vector<lower=0>[(e_hs_for_assoc>0)*e_A] e_local_for_assoc[e_hs_for_assoc];
+  vector<lower=0>[e_A] e_mix_for_assoc[e_prior_dist_for_assoc == 5 || e_prior_dist_for_assoc == 6];
+  real<lower=0> e_ool_for_assoc[e_prior_dist_for_assoc == 6];

@@ -658,6 +658,18 @@ stan_jm <- function(formulaLong, dataLong, formulaEvent, dataEvent, time_var,
   # Incorporate intercept term if Weibull baseline hazard
   e_has_intercept <- e_mod_stuff$has_intercept <- (basehaz$type == 1L)
 
+  #-----------------------------------
+  # Data for recurrent event submodel
+  #-----------------------------------
+
+  if (!id_var %in% colnames(dataRecur))
+    stop(paste0("Variable '", id_var, "' must be appear in dataRecur"), call. = FALSE)
+  
+  # Fit separate recurrent event submodel
+  r_mod_stuff <- handle_coxmod(r_mc, quadnodes = quadnodes, id_var = id_var, 
+                               unique_id_list = unique_id_list, sparse = sparse,
+                               env = calling_env, terminating = FALSE)
+  
   #--------------------------------
   # Data for association structure
   #--------------------------------
@@ -728,18 +740,20 @@ stan_jm <- function(formulaLong, dataLong, formulaEvent, dataEvent, time_var,
                                         env             = calling_env))
 
   # Number of association parameters
-  a_K <- get_num_assoc_pars(assoc, a_mod_stuff)
+  e_A <- get_num_assoc_pars(assoc, a_mod_stuff)
   
   #---------------------
   # Prior distributions
   #---------------------
   
-  
   ok_dists <- nlist("normal", student_t = "t", "cauchy", "hs", "hs_plus", 
                     "laplace", "lasso")
   ok_intercept_dists <- ok_dists[1:3]
+  ok_frailty_dists <- ok_dists[1]
+  ok_frscale_dists <- ok_dists[1:3]
   ok_y_aux_dists <- c(ok_dists[1:3], exponential = "exponential")
-  ok_e_aux_dists <- ok_dists[1:3]
+  ok_e_aux_dists <- ok_dists[1:3] # basehaz pars, terminating event
+  ok_r_aux_dists <- ok_dists[1:3] # basehaz pars, recurrent event
   
   # Note: *_user_prior_*_stuff objects are stored unchanged for constructing 
   # prior_summary, while *_prior_*_stuff objects are autoscaled
@@ -794,15 +808,60 @@ stan_jm <- function(formulaLong, dataLong, formulaEvent, dataEvent, time_var,
       ok_dists = ok_e_aux_dists
     )
   
-  # Priors for association parameters
-  a_user_prior_stuff <- a_prior_stuff <- 
+  e_user_prior_assoc_stuff <- e_prior_assoc_stuff <- 
     handle_glm_prior(
-      priorAssoc,
-      nvars = a_K,
+      priorEvent_assoc,
+      nvars = e_A,
+      default_scale = 2.5,
+      link = NULL,
+      ok_dists = ok_dists
+    )
+  
+  e_user_prior_frailty_stuff <- e_prior_frailty_stuff <- 
+    handle_glm_prior(
+      priorFrailty, 
+      nvars = 1,
+      default_scale = 2.5,
+      link = NULL,
+      ok_dists = ok_frailty_dists
+    )
+  
+  e_user_prior_frailty_stuff <- e_prior_frailty_stuff <- 
+    handle_glm_prior(
+      priorEvent_frscale, # prior for coefficient on frailty term
+      nvars = 1,
+      default_scale = 2.5,
+      link = NULL,
+      ok_dists = ok_frscale_dists
+    )  
+  
+  # Priors for recurrent event submodel
+  r_user_prior_stuff <- r_prior_stuff <- 
+    handle_glm_prior(
+      priorRecur,
+      nvars = r_mod_stuff$K,
       default_scale = 2.5,
       link = NULL,
       ok_dists = ok_dists
     )  
+  
+  r_user_prior_intercept_stuff <- r_prior_intercept_stuff <- 
+    handle_glm_prior(
+      priorRecur_intercept,
+      nvars = 1,
+      default_scale = 50,
+      link = NULL,
+      ok_dists = ok_intercept_dists
+    )  
+  
+  r_user_prior_aux_stuff <- r_prior_aux_stuff <-
+    handle_glm_prior(
+      priorRecur_aux,
+      nvars = basehaz$df,
+      default_scale = 50,
+      link = NULL,
+      ok_dists = ok_r_aux_dists
+    )
 
   # Minimum scaling of priors
   y_prior_stuff           <- Map(autoscale_prior, y_prior_stuff, y_mod_stuff, QR = QR, use_x = TRUE)
@@ -811,9 +870,13 @@ stan_jm <- function(formulaLong, dataLong, formulaEvent, dataEvent, time_var,
   e_prior_stuff           <- autoscale_prior(e_prior_stuff, e_mod_stuff, QR = QR, use_x = TRUE)
   e_prior_intercept_stuff <- autoscale_prior(e_prior_intercept_stuff, e_mod_stuff, QR = QR, use_x = FALSE)
   e_prior_aux_stuff       <- autoscale_prior(e_prior_aux_stuff, e_mod_stuff, QR = QR, use_x = FALSE)
-  if (a_K)
-    a_prior_stuff <- autoscale_prior(a_prior_stuff, a_mod_stuff, QR = QR, use_x = FALSE, 
-                                     assoc = assoc, family = family)
+  if (e_A)
+    e_prior_assoc_stuff <- autoscale_prior(e_prior_assoc_stuff, a_mod_stuff, QR = QR, use_x = FALSE, 
+                                           assoc = assoc, family = family)
+  # NB no prior scaling for frailty term, or coefficient on frailty term (yet)
+  r_prior_stuff           <- autoscale_prior(r_prior_stuff, r_mod_stuff, QR = QR, use_x = TRUE)
+  r_prior_intercept_stuff <- autoscale_prior(r_prior_intercept_stuff, r_mod_stuff, QR = QR, use_x = FALSE)
+  r_prior_aux_stuff       <- autoscale_prior(r_prior_aux_stuff, r_mod_stuff, QR = QR, use_x = FALSE)
   
   #-------------------------
   # Data for export to Stan
@@ -828,8 +891,13 @@ stan_jm <- function(formulaLong, dataLong, formulaEvent, dataEvent, time_var,
     e_prior_dist              = e_prior_stuff$prior_dist,
     e_prior_dist_for_intercept= e_prior_intercept_stuff$prior_dist,
     e_prior_dist_for_aux      = e_prior_aux_stuff$prior_dist,
-    a_prior_dist              = a_prior_stuff$prior_dist,    
- 
+    e_prior_dist_for_assoc    = e_prior_assoc_stuff$prior_dist,    
+    e_prior_dist_for_frailty  = e_prior_frailty_stuff$prior_dist,
+    e_prior_dist_for_frscale  = e_prior_frscale_stuff$prior_dist,    
+    r_prior_dist              = r_prior_stuff$prior_dist,
+    r_prior_dist_for_intercept= r_prior_intercept_stuff$prior_dist,
+    r_prior_dist_for_aux      = r_prior_aux_stuff$prior_dist,
+    
     # hyperparameters for longitudinal submodel priors
     prior_mean                 = fetch_array(y_prior_stuff,           "prior_mean"), 
     prior_scale                = fetch_array(y_prior_stuff,           "prior_scale"), 
@@ -847,6 +915,8 @@ stan_jm <- function(formulaLong, dataLong, formulaEvent, dataEvent, time_var,
     e_prior_mean               = e_prior_stuff$prior_mean, 
     e_prior_scale              = e_prior_stuff$prior_scale, 
     e_prior_df                 = e_prior_stuff$prior_df, 
+    e_global_prior_scale       = e_prior_stuff$global_prior_scale,
+    e_global_prior_df          = e_prior_stuff$global_prior_df,
     e_prior_mean_for_intercept = c(e_prior_intercept_stuff$prior_mean),
     e_prior_scale_for_intercept= c(e_prior_intercept_stuff$prior_scale), 
     e_prior_df_for_intercept   = c(e_prior_intercept_stuff$prior_df),
@@ -854,16 +924,32 @@ stan_jm <- function(formulaLong, dataLong, formulaEvent, dataEvent, time_var,
                                    as.array(e_prior_aux_stuff$prior_mean),  
     e_prior_scale_for_aux      = e_prior_aux_stuff$prior_scale, 
     e_prior_df_for_aux         = e_prior_aux_stuff$prior_df,
-    e_global_prior_scale       = e_prior_stuff$global_prior_scale,
-    e_global_prior_df          = e_prior_stuff$global_prior_df,
-    
-    # hyperparameters for assoc parameter priors
-    a_prior_mean               = a_prior_stuff$prior_mean, 
-    a_prior_scale              = a_prior_stuff$prior_scale, 
-    a_prior_df                 = a_prior_stuff$prior_df, 
-    a_global_prior_scale       = a_prior_stuff$global_prior_scale,
-    a_global_prior_df          = a_prior_stuff$global_prior_df,
-    
+    e_prior_mean_for_assoc     = e_prior_assoc_stuff$prior_mean, 
+    e_prior_scale_for_assoc    = e_prior_assoc_stuff$prior_scale, 
+    e_prior_df_for_assoc       = e_prior_assoc_stuff$prior_df, 
+    e_global_prior_scale_for_assoc = e_prior_assoc_stuff$global_prior_scale,
+    e_global_prior_df_for_assoc    = e_prior_assoc_stuff$global_prior_df,
+    e_prior_mean_for_frailty   = c(e_prior_frailty_stuff$prior_mean),
+    e_prior_scale_for_frailty  = c(e_prior_frailty_stuff$prior_scale), 
+    e_prior_df_for_frailty     = c(e_prior_frailty_stuff$prior_df),
+    e_prior_mean_for_frscale   = c(e_prior_frscale_stuff$prior_mean),
+    e_prior_scale_for_frscale  = c(e_prior_frscale_stuff$prior_scale), 
+    e_prior_df_for_frscale     = c(e_prior_frscale_stuff$prior_df),
+
+    # hyperparameters for recurrent event submodel priors
+    r_prior_mean               = r_prior_stuff$prior_mean, 
+    r_prior_scale              = r_prior_stuff$prior_scale, 
+    r_prior_df                 = r_prior_stuff$prior_df, 
+    r_global_prior_scale       = r_prior_stuff$global_prior_scale,
+    r_global_prior_df          = r_prior_stuff$global_prior_df,
+    r_prior_mean_for_intercept = c(r_prior_intercept_stuff$prior_mean),
+    r_prior_scale_for_intercept= c(r_prior_intercept_stuff$prior_scale), 
+    r_prior_df_for_intercept   = c(r_prior_intercept_stuff$prior_df),
+    r_prior_mean_for_aux       = if (basehaz$type == 1L) as.array(0) else 
+      as.array(r_prior_aux_stuff$prior_mean),  
+    r_prior_scale_for_aux      = r_prior_aux_stuff$prior_scale, 
+    r_prior_df_for_aux         = r_prior_aux_stuff$prior_df,
+        
     # flags
     prior_PD = as.integer(prior_PD)
   )
@@ -882,7 +968,8 @@ stan_jm <- function(formulaLong, dataLong, formulaEvent, dataEvent, time_var,
   standata$NM_int <- fetch_array(y_mod_stuff, "int_N") 
   standata$K      <- as.integer(sum(standata$KM))
   standata$e_K    <- as.integer(e_mod_stuff$K)
-  standata$a_K    <- as.integer(a_K)  
+  standata$e_A    <- as.integer(e_A)  
+  standata$r_K    <- if (has_recurrent) as.integer(r_mod_stuff$K) else 0L
   standata$N      <- as.integer(sum(standata$NM))  
   standata$N_real <- as.integer(sum(fetch_(y_mod_stuff, "real_N"))) 
   standata$N_int  <- as.integer(sum(fetch_(y_mod_stuff, "int_N")))
@@ -1006,7 +1093,7 @@ stan_jm <- function(formulaLong, dataLong, formulaEvent, dataEvent, time_var,
     standata$regularization <- 
       as.array(maybe_broadcast(decov_args$regularization, sum(p > 1))) 
   }  
-  
+
   # Families
   standata$family <- as.array(sapply(1:M, function(x) {
     return_fam <- switch(family[[x]]$family, 
@@ -1024,11 +1111,11 @@ stan_jm <- function(formulaLong, dataLong, formulaEvent, dataEvent, time_var,
   # Dimensions, response, design matrix, etc
   standata$Npat            <- as.integer(e_mod_stuff$Npat)
   standata$quadnodes       <- as.integer(quadnodes)
-  standata$quadweight      <- as.array(e_mod_stuff$quadweight)
+  standata$quadweight      <- as.array(e_mod_stuff$qwts)
   standata$Npat_times_quadnodes <- as.integer(e_mod_stuff$Npat * quadnodes)
   standata$nrow_e_Xq       <- NROW(e_mod_stuff$xtemp)
-  standata$e_times         <- c(e_mod_stuff$eventtime, unlist(e_mod_stuff$quadpoint))
-  standata$e_d             <- c(e_mod_stuff$d, rep(1, length(unlist(e_mod_stuff$quadpoint))))
+  standata$e_times         <- c(e_mod_stuff$eventtime, unlist(e_mod_stuff$qpts))
+  standata$e_d             <- c(e_mod_stuff$d, rep(1, length(unlist(e_mod_stuff$qpts))))
   standata$e_has_intercept <- as.integer(e_has_intercept)
   standata$e_Xq            <- e_mod_stuff$xtemp
   standata$e_xbar          <- as.array(e_mod_stuff$xbar)
@@ -1168,6 +1255,36 @@ stan_jm <- function(formulaLong, dataLong, formulaEvent, dataEvent, time_var,
   for (i in c("a_K_data", paste0("size_which_", c("b", "coef", "interactions")))) {
     standata[[paste0("sum_", i)]] <- as.integer(sum(standata[[i]]))
   }
+
+  #----- Recurrent event submodel (including GK quadrature)
+  
+  # Dimensions, response, design matrix, etc
+  standata$recurNi         <- as.integer(r_mod_stuff$recurNi) # num recurrences for each individual
+  standata$nrow_r_Xq       <- NROW(r_mod_stuff$xtemp)
+  standata$r_times         <- c(r_mod_stuff$recurtime, unlist(r_mod_stuff$qpts))
+  standata$r_d             <- c(rep(1, length(standata$r_times)))
+  standata$r_has_intercept <- as.integer(e_has_intercept)
+  standata$r_Xq            <- r_mod_stuff$xtemp
+  standata$r_xbar          <- as.array(r_mod_stuff$xbar)
+  #standata$r_weights       <- as.array(r_weights) # not implemented
+  #standata$r_weights_rep   <- as.array(rep(r_weights, times = quadnodes)) # not implemented
+  
+  if (has_recurrent) {
+    if (basehaz$type_name == "weibull") {
+      standata$r_basehaz_X <- matrix(log(standata$r_times), length(standata$r_times), 1) 
+    } else if (basehaz$type_name == "bs") {
+      standata$r_basehaz_X <- as.array(predict(basehaz$bs_basis, standata$r_times)) 
+    } else if (basehaz$type_name == "piecewise") {
+      r_times_quantiles <- cut(standata$r_times, basehaz$knots, 
+                               include.lowest = TRUE, labels = FALSE)
+      tmp <- matrix(NA, length(r_times_quantiles), basehaz$df)
+      for (i in 1:basehaz$df) 
+        tmp[, i] <- ifelse(r_times_quantiles == i, 1, 0)
+      standata$r_basehaz_X <- as.array(tmp)
+    } else {
+      standata$r_basehaz_X <- matrix(0,0,0)  
+    }    
+  }
   
   #----------------
   # Initial values
@@ -1236,10 +1353,14 @@ stan_jm <- function(formulaLong, dataLong, formulaEvent, dataEvent, time_var,
             if (standata$K) "beta",
             if (standata$e_has_intercept) "e_gamma",
             if (standata$e_K) "e_beta",
-            if (standata$a_K) "a_beta",
+            if (has_recurrent) "f_beta",
+            if (standata$e_A) "a_beta",
+            if (standata$r_K) "r_beta",
             if (standata$q) "b",
             if (standata$sum_has_aux) "aux",
             if (length(standata$basehaz_X)) "e_aux",
+            if (has_recurrent && length(standata$basehaz_X)) "r_aux",
+            if (has_recurrent) "frailty_sd",
             if (standata$len_theta_L) "theta_L",
             "mean_PPD")
             
@@ -1309,6 +1430,13 @@ stan_jm <- function(formulaLong, dataLong, formulaEvent, dataEvent, time_var,
       all_nms[assoc["which_coef_zindex",][[m]]]})
     a_nms <- c(a_nms, paste0("Assoc|", unlist(temp_g_nms)))
   }
+  if (has_recurrent) {
+    r_nms <- if (ncol(r_mod_stuff$xtemp)) paste0("Recur|", colnames(r_mod_stuff$xtemp))    
+    r_int_nms <- if (r_has_intercept) "Recur|(Intercept)"
+    r_aux_nms <- if (basehaz$type == 1L) "Recur|weibull-shape" else paste0("Recur|basehaz-coef", seq(basehaz$df))
+    frailtysd_nms <- "SD_for_frailty"
+    frscale_nms <- "Event|coef_on_frailty"
+  }
   
   # Sigma values in stanmat, and Sigma names
   if (standata$len_theta_L) {
@@ -1344,10 +1472,14 @@ stan_jm <- function(formulaLong, dataLong, formulaEvent, dataEvent, time_var,
                  y_nms,
                  e_int_nms,
                  e_nms,
-                 a_nms,                   
+                 if (has_recurrent) frscale_nms,
+                 a_nms,
+                 if (has_recurrent) r_nms,
                  if (length(standata$q)) c(paste0("b[", b_nms, "]")),
                  y_aux_nms,
                  e_aux_nms,
+                 if (has_recurrent) r_aux_nms,
+                 if (has_recurrent) frailtysd_nms,
                  if (standata$len_theta_L) paste0("Sigma[", Sigma_nms, "]"),
                  paste0("Long", 1:M, "|mean_PPD"), 
                  "log-posterior")
@@ -1672,13 +1804,16 @@ check_for_aux <- function(family) {
 # Fit separate event submodel
 #
 # @param mc The (slightly modified) user specified call for the event submodel
-# @param quadnodes An integer, the user specified number of GK quadrature nodes
+# @param qnodes An integer, the user specified number of GK quadrature nodes
 # @param id_var The name of the ID variable
 # @param unique_id_list A character vector with the unique IDs (factor levels)
 #   that appeared in the longitudinal submodels
 # @param sparse A logical indicating whether to use a sparse design matrix
-handle_coxmod <- function(mc, quadnodes, id_var, unique_id_list, sparse,
-                          env = parent.frame()) {
+# @param env Environment in which to evaluate the matched call
+# @param terminating Logical specifying whether the submodel is for the 
+#   terminating (TRUE) or recurrent (FALSE) event submodel
+handle_coxmod <- function(mc, qnodes, id_var, unique_id_list, sparse,
+                          env = parent.frame(), terminating = TRUE) {
   
   mc[[1]] <- quote(survival::coxph) 
   mc$x    <- TRUE
@@ -1687,32 +1822,53 @@ handle_coxmod <- function(mc, quadnodes, id_var, unique_id_list, sparse,
   # since lme4 promotes character grouping variables to factors
   if (is.character(mf1[[id_var]]))
     mf1[[id_var]] <- as.factor(mf1[[id_var]])
-  mf2 <- cbind(unclass(mf1[,1]), mf1[, -1, drop = FALSE])
-  y   <- mod$y
-  
-  # Entry and exit times
-  entrytime <- rep(0, length(unique_id_list)) # entry times currently assumed to be zero for all individuals, i.e. no delayed entry
-  if (attr(y, "type") == "counting") {
-    tvc         <- TRUE
-    mf_event    <- do.call(rbind, lapply(split(mf2, mf2[, id_var]), function(d) d[which.max(d[,"stop"]), ]))
-    eventtime   <- mf_event[["stop"]]
-  } else if (attr(y, "type") == "right") {
-    tvc         <- FALSE 
-    mf_event    <- mf2
-    eventtime   <- mf_event[["time"]]
-  } else stop("Only 'right' or 'counting' type Surv objects are allowed 
-               on the LHS of the event submodel formula")
-  
-  # Event indicator and ID list
-  d     <- mf_event[["status"]]  
-  flist <- mf_event[[id_var]]
-  names(eventtime) <- names(d) <- flist
-  
+  mf2 <- cbind(unclass(mf1[, 1L]), mf1[, -1L, drop = FALSE])
+  if (terminating) { # terminating event
+    if (attr(y, "type") == "counting") {
+      tvc <- TRUE
+      start  <- mf2[["start"]]
+      stop   <- mf2[["stop"]]
+      status <- mf2[["status"]]
+      idlist <- mf2[[id_var]]
+      entrytime <- tapply(start, idlist, min)
+      eventtime <- tapply(stop, idlist, max)
+      d <- tapply(status, idlist, max)
+      ids <- unique(idlist)
+      names(entrytime) <- names(eventtime) <- names(d) <- ids
+    } else if (attr(y, "type") == "right") {
+      tvc <- FALSE 
+      entrytime <- rep(0, nrow(mf2))
+      eventtime <- mf2[["time"]]
+      d <- mf2[["status"]]
+      idlist <- ids <- mf2[[id_var]]
+      names(entrytime) <- names(eventtime) <- names(d) <- ids
+    } else stop("Only 'right' or 'counting' type Surv objects are allowed 
+                on the LHS of the event submodel formula")
+  } else { # recurrent event
+    if (attr(y, "type") == "counting") {
+      tvc <- TRUE
+      start  <- mf2[["start"]]
+      stop   <- mf2[["stop"]]
+      status <- mf2[["status"]]
+      idlist <- mf2[[id_var]]
+      entrytime <- tapply(start, idlist, min)
+      eventtime <- tapply(stop, idlist, max)
+      recurtime <- stop[status == 1]
+      recurids <- idlist[status == 1]
+      recurNi <- table(factor(idlist)[status == 1])
+      d <- NULL
+      ids <- unique(idlist)
+      names(entrytime) <- names(eventtime) <- ids
+      names(recurtimes) <- recurids
+    } else stop("Only 'counting' type Surv objects (ie. start/stop) notation 
+                are allowed on the LHS of the recurrent event submodel formula")
+  }
+   
   # Error checks for the ID variable
-  if (!identical(unique_id_list, levels(factor(flist))))
+  if (!identical(unique_id_list, levels(factor(idlist))))
     stop("The patient IDs (levels of the grouping factor) included ",
          "in the longitudinal and event submodels do not match")
-  if (is.unsorted(factor(flist)))
+  if (is.unsorted(factor(idlist)))
     stop("'dataEvent' needs to be sorted by the subject ",
          "ID/grouping variable", call. = FALSE)
   if (!identical(length(unique_id_list), length(eventtime)))
@@ -1720,61 +1876,58 @@ handle_coxmod <- function(mc, quadnodes, id_var, unique_id_list, sparse,
          "event submodels. Perhaps you intended to use 'start/stop' notation ",
          "for the Surv() object.")
   
-  # Unstandardised quadrature points
-  quadpoint <- lapply(get_quadpoints(quadnodes)$points, unstandardise_quadpoints, entrytime, eventtime)
-  quadtimes <- c(list(eventtime), quadpoint)
-  names(quadpoint) <- paste0("quadpoint", seq(quadnodes))
-  names(quadtimes) <- c("eventtime", names(quadpoint))
+  # Unstandardised quadrature points, weights, and upper limit for integral
+  qq <- get_quadpoints(qnodes)
+  qpts <- lapply(qq$pts, unstandardise_qpts, entrytime, eventtime)
+  qwts <- lapply(qq$wts, unstandardise_qwts, entrytime, eventtime)
+  qlim <- if (terminating) list(eventtime) else list(recurtime)
+  names(qpts) <- paste0("quadpoint", seq(qnodes))
+  names(qwts) <- paste0("quadweight", seq(qnodes))
   
-  # Obtain design matrix at event times and unstandardised quadrature points
-  
-  if (tvc) {  # time varying covariates in event model
-    
-    # Model frame at event times
-    mf2           <- data.table(mf2, key = c(id_var, "start"))
-    mf2[["start"]] <- as.numeric(mf2[["start"]])
-    mf2_eventtime <- mf2[, .SD[.N], by = get(id_var)]
-    mf2_eventtime <- mf2_eventtime[, get := NULL]   
-    
-    # Model frame corresponding to observation times which are 
-    #   as close as possible to the unstandardised quadrature points                      
-    mf2_q  <- do.call(rbind, lapply(quadpoint, FUN = function(x)
-      mf2[data.table::SJ(flist, x), roll = TRUE, rollends = c(TRUE, TRUE)]))
-    
-    # Model frame evaluated at both event times and quadrature points
-    mf2_q <- rbind(mf2_eventtime, mf2_q)
-    
+  if (tvc) {
     # Design matrix evaluated at event times and quadrature points
     #   NB Here there are time varying covariates in the event submodel and
-    #   therefore the design matrix differs depending on the quadrature point 
+    #   therefore the design matrix differs depending on the quadrature point.
+    #   The design matrix is constructed using observation times that are as 
+    #   close as possible to the unstandardised quadrature points.
+    mf2 <- data.table(mf2, key = c(id_var, "start"))
+    mf2[["start"]] <- as.numeric(mf2[["start"]])
+    idvec <- if (terminating) rep(list(ids), qnodes+1) else 
+      c(list(recurids), rep(list(ids), qnodes))
+    times <- c(qlim, qpts)
+    mf2_q  <- do.call(rbind, mapply(FUN = function(x, y)
+      mf2[data.table::SJ(x, y), roll = TRUE, rollends = c(TRUE, TRUE)],
+      x = idvec, y = times, SIMPLIFY = FALSE))
     fm_RHS <- delete.response(terms(mod))
-    x_quadtime   <- model.matrix(fm_RHS, data = mf2_q)
-    
-  } else {  # no time varying covariates in event model
-    
+    x_q <- model.matrix(fm_RHS, data = mf2_q)
+  } else {
     # Design matrix evaluated at event times and quadrature points
     #   NB Here there are no time varying covariates in the event submodel and
     #   therefore the design matrix is identical at event time and at all
     #   quadrature points
-    x_quadtime   <- do.call(rbind, lapply(1:(quadnodes + 1), FUN = function(x) mod$x))
-    
+    x_q <- do.call(rbind, lapply(1:(qnodes + 1), FUN = function(x) mod$x))
   }
   
   # Centering of design matrix for event model
   xtemp <- xbar <- has_intercept <- NULL # useless assignments for R CMD check
-  x <- as.matrix(x_quadtime) 
+  x <- as.matrix(x_q) 
   x_stuff <- center_x(x, sparse)
   for (i in names(x_stuff)) # xtemp, xbar, has_intercept
     assign(i, x_stuff[[i]])
   
-  # Some additional bits -- NB weights here are quadrature weights, not prior weights
-  K <- NCOL(xtemp)
-  Npat <- length(eventtime)
-  quadweight <- unlist(lapply(get_quadpoints(quadnodes)$weights, unstandardise_quadweights, entrytime, eventtime))
+  # Some additional bits
+  K <- NCOL(xtemp)     # num predictors
+  Npat <- length(ids)  # num individuals
   
   # Return list
-  nlist(mod, entrytime, eventtime, d, x, xtemp, xbar, flist, 
-        quadpoint, quadweight, quadtimes, tvc, K, Npat, model_frame = mf1)
+  ret <- nlist(mod, entrytime, eventtime, d, x, xtemp, xbar, idlist, ids,
+               qpts, qwts, qlim, tvc, K, Npat, model_frame = mf1)
+  if (terminating) {
+    ret$recurtime <- recurtime
+    ret$recurids <- recurids
+    ret$recurNi <- recurNi
+  }
+  ret
 }
 
 # Deal with the baseline hazard
@@ -1870,10 +2023,10 @@ handle_basehaz <- function(basehaz, basehaz_ops,
 #   quadrature nodes
 get_quadpoints <- function(nodes = 15) {
   if (!is.numeric(nodes) || (length(nodes) > 1L)) {
-    stop("'quadnodes' should be a numeric vector of length 1.")
+    stop("'nodes' should be a numeric vector of length 1.")
   } else if (nodes == 15) {
     list(
-      points = c(
+      pts = c(
         -0.991455371120812639207,
         -0.949107912342758524526,
         -0.86486442335976907279,
@@ -1889,7 +2042,7 @@ get_quadpoints <- function(nodes = 15) {
         0.86486442335976907279,
         0.9491079123427585245262,
         0.991455371120812639207),
-      weights = c(
+      wts = c(
         0.0229353220105292249637,
         0.063092092629978553291,
         0.10479001032225018384,
@@ -1907,7 +2060,7 @@ get_quadpoints <- function(nodes = 15) {
         0.0229353220105292249637))      
   } else if (nodes == 11) {
     list(
-      points = c(
+      pts = c(
         -0.984085360094842464496,
         -0.906179845938663992798,
         -0.754166726570849220441,
@@ -1919,7 +2072,7 @@ get_quadpoints <- function(nodes = 15) {
         0.754166726570849220441,
         0.906179845938663992798,
         0.984085360094842464496),
-      weights = c(
+      wts = c(
         0.042582036751081832865,
         0.1152333166224733940246,
         0.186800796556492657468,
@@ -1933,7 +2086,7 @@ get_quadpoints <- function(nodes = 15) {
         0.042582036751081832865))     
   } else if (nodes == 7) {
     list(
-      points = c(
+      pts = c(
         -0.9604912687080202834235,
         -0.7745966692414833770359,
         -0.4342437493468025580021,
@@ -1941,7 +2094,7 @@ get_quadpoints <- function(nodes = 15) {
         0.4342437493468025580021,
         0.7745966692414833770359,
         0.9604912687080202834235),
-      weights = c(
+      wts = c(
         0.1046562260264672651938,
         0.268488089868333440729,
         0.401397414775962222905,
@@ -1949,7 +2102,7 @@ get_quadpoints <- function(nodes = 15) {
         0.401397414775962222905,
         0.268488089868333440729,
         0.104656226026467265194))      
-  } else stop("'quadnodes' must be either 7, 11 or 15.")  
+  } else stop("'nodes' must be either 7, 11 or 15.")  
 }
 
 

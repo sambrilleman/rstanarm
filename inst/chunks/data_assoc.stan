@@ -1,9 +1,9 @@
   // prior family: 0 = none, 1 = normal, 2 = student_t, 3 = hs, 4 = hs_plus, 
   //   5 = laplace, 6 = lasso
-  int<lower=0,upper=6> a_prior_dist;
+  int<lower=0,upper=6> e_prior_dist_for_assoc;
 
   // data for association structure
-  int<lower=0> a_K;                     // num. of association parameters
+  int<lower=0> e_A;                     // num. of association parameters
   int<lower=0,upper=1> assoc;           // 0 = no assoc structure, 1 = any assoc structure
   int<lower=0,upper=1> assoc_uses[6];   // which components required to build association terms
   int<lower=0,upper=1> has_assoc[16,M]; // which association terms does each submodel use
