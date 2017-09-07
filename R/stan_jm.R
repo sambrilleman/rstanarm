@@ -498,7 +498,8 @@
 #' @import data.table
 #' @importFrom lme4 lmerControl glmerControl glmer
 #' 
-stan_jm <- function(formulaLong, dataLong, formulaEvent, dataEvent, time_var, 
+stan_jm <- function(formulaLong, dataLong, formulaEvent, dataEvent, 
+                    formulaRecur, dataRecur, time_var, 
                     id_var, family = gaussian, assoc = "etavalue", 
                     lag_assoc = 0, grp_assoc, dataAssoc,
                     basehaz = c("weibull", "bs", "piecewise"), basehaz_ops, 
@@ -538,6 +539,8 @@ stan_jm <- function(formulaLong, dataLong, formulaEvent, dataEvent, time_var,
   if (missing(id_var))      id_var      <- NULL
   if (missing(grp_assoc))   grp_assoc   <- NULL
   if (missing(dataAssoc))   dataAssoc   <- NULL 
+  if (missing(formulaRecur))formulaRecur<- NULL 
+  if (missing(dataRecur))   dataRecur   <- NULL 
   
   # Validate arguments
   basehaz   <- match.arg(basehaz)
@@ -604,7 +607,17 @@ stan_jm <- function(formulaLong, dataLong, formulaEvent, dataEvent, time_var,
   # Create call for event submodel
   e_mc <- mc
   e_mc <- strip_nms(e_mc, "Event")
-  e_mc$formulaLong <- e_mc$dataLong <- e_mc$family <- NULL
+  e_mc$formulaLong <- e_mc$dataLong <- e_mc$family <- 
+    e_mc$formulaRecur <- e_mc$dataRecur <- NULL
+  
+  # Create call for recurrent event submodel
+  has_recurrent <- !is.null(formulaRecur)
+  if (has_recurrent && is.null(dataRecur))
+    stop("'dataRecur' must be supplied when 'formulaRecur' is supplied.")
+  r_mc <- mc
+  r_mc <- strip_nms(r_mc, "Recur")
+  r_mc$formulaLong <- r_mc$dataLong <- r_mc$family <- 
+    r_mc$formulaEvent <- r_mc$dataEvent <- NULL
   
   # Is priorLong* already a list?
   priorLong           <- maybe_broadcast_priorarg(priorLong, M)
@@ -750,7 +763,7 @@ stan_jm <- function(formulaLong, dataLong, formulaEvent, dataEvent, time_var,
                     "laplace", "lasso")
   ok_intercept_dists <- ok_dists[1:3]
   ok_frailty_dists <- ok_dists[1]
-  ok_frscale_dists <- ok_dists[1:3]
+  ok_frscale_dists <- ok_dists[1]
   ok_y_aux_dists <- c(ok_dists[1:3], exponential = "exponential")
   ok_e_aux_dists <- ok_dists[1:3] # basehaz pars, terminating event
   ok_r_aux_dists <- ok_dists[1:3] # basehaz pars, recurrent event
@@ -929,9 +942,6 @@ stan_jm <- function(formulaLong, dataLong, formulaEvent, dataEvent, time_var,
     e_prior_df_for_assoc       = e_prior_assoc_stuff$prior_df, 
     e_global_prior_scale_for_assoc = e_prior_assoc_stuff$global_prior_scale,
     e_global_prior_df_for_assoc    = e_prior_assoc_stuff$global_prior_df,
-    e_prior_mean_for_frailty   = c(e_prior_frailty_stuff$prior_mean),
-    e_prior_scale_for_frailty  = c(e_prior_frailty_stuff$prior_scale), 
-    e_prior_df_for_frailty     = c(e_prior_frailty_stuff$prior_df),
     e_prior_mean_for_frscale   = c(e_prior_frscale_stuff$prior_mean),
     e_prior_scale_for_frscale  = c(e_prior_frscale_stuff$prior_scale), 
     e_prior_df_for_frscale     = c(e_prior_frscale_stuff$prior_df),
@@ -949,7 +959,8 @@ stan_jm <- function(formulaLong, dataLong, formulaEvent, dataEvent, time_var,
       as.array(r_prior_aux_stuff$prior_mean),  
     r_prior_scale_for_aux      = r_prior_aux_stuff$prior_scale, 
     r_prior_df_for_aux         = r_prior_aux_stuff$prior_df,
-        
+    frailty_mean               = c(0.0),
+    
     # flags
     prior_PD = as.integer(prior_PD)
   )
@@ -1121,6 +1132,7 @@ stan_jm <- function(formulaLong, dataLong, formulaEvent, dataEvent, time_var,
   standata$e_xbar          <- as.array(e_mod_stuff$xbar)
   standata$e_weights       <- as.array(e_weights)
   standata$e_weights_rep   <- as.array(rep(e_weights, times = quadnodes))
+  standata$e_uindices      <- e_mod_stuff$uindices
   
   # Baseline hazard
   standata$basehaz_type <- as.integer(basehaz$type)
@@ -1259,15 +1271,18 @@ stan_jm <- function(formulaLong, dataLong, formulaEvent, dataEvent, time_var,
   #----- Recurrent event submodel (including GK quadrature)
   
   # Dimensions, response, design matrix, etc
-  standata$recurNi         <- as.integer(r_mod_stuff$recurNi) # num recurrences for each individual
-  standata$nrow_r_Xq       <- NROW(r_mod_stuff$xtemp)
-  standata$r_times         <- c(r_mod_stuff$recurtime, unlist(r_mod_stuff$qpts))
-  standata$r_d             <- c(rep(1, length(standata$r_times)))
+  standata$has_recurrent <- as.integer(has_recurrent)
+  standata$Nri       <- as.integer(r_mod_stuff$Nri) # num. recurrent events for each individual
+  standata$Nrtotal   <- as.integer(r_mod_stuff$Nrtotal) # total num. recurrent events
+  standata$nrow_r_Xq <- NROW(r_mod_stuff$xtemp)
+  standata$r_times   <- c(r_mod_stuff$recurtime, unlist(r_mod_stuff$qpts))
+  standata$r_d       <- c(rep(1, length(standata$r_times)))
   standata$r_has_intercept <- as.integer(e_has_intercept)
-  standata$r_Xq            <- r_mod_stuff$xtemp
-  standata$r_xbar          <- as.array(r_mod_stuff$xbar)
-  #standata$r_weights       <- as.array(r_weights) # not implemented
-  #standata$r_weights_rep   <- as.array(rep(r_weights, times = quadnodes)) # not implemented
+  standata$r_Xq      <- r_mod_stuff$xtemp
+  standata$r_xbar    <- as.array(r_mod_stuff$xbar)
+  #standata$r_weights <- as.array(r_weights) # not implemented
+  #standata$r_weights_rep <- as.array(rep(r_weights, times = quadnodes)) # not implemented
+  standata$r_uindices <- r_mod_stuff$uindices
   
   if (has_recurrent) {
     if (basehaz$type_name == "weibull") {
@@ -1284,6 +1299,8 @@ stan_jm <- function(formulaLong, dataLong, formulaEvent, dataEvent, time_var,
     } else {
       standata$r_basehaz_X <- matrix(0,0,0)  
     }    
+  } else {
+    standata$r_basehaz_X <- matrix(0,0,0)  
   }
   
   #----------------
@@ -1353,14 +1370,13 @@ stan_jm <- function(formulaLong, dataLong, formulaEvent, dataEvent, time_var,
             if (standata$K) "beta",
             if (standata$e_has_intercept) "e_gamma",
             if (standata$e_K) "e_beta",
-            if (has_recurrent) "f_beta",
-            if (standata$e_A) "a_beta",
+            if (has_recurrent) "e_fbeta",
+            if (standata$e_A) "e_alpha",
             if (standata$r_K) "r_beta",
             if (standata$q) "b",
             if (standata$sum_has_aux) "aux",
             if (length(standata$basehaz_X)) "e_aux",
             if (has_recurrent && length(standata$basehaz_X)) "r_aux",
-            if (has_recurrent) "frailty_sd",
             if (standata$len_theta_L) "theta_L",
             "mean_PPD")
             
@@ -1854,8 +1870,9 @@ handle_coxmod <- function(mc, qnodes, id_var, unique_id_list, sparse,
       entrytime <- tapply(start, idlist, min)
       eventtime <- tapply(stop, idlist, max)
       recurtime <- stop[status == 1]
-      recurids <- idlist[status == 1]
-      recurNi <- table(factor(idlist)[status == 1])
+      recurids  <- idlist[status == 1]
+      Nri       <- table(factor(idlist)[status == 1])
+      Nrtotal   <- sum(Nri)
       d <- NULL
       ids <- unique(idlist)
       names(entrytime) <- names(eventtime) <- ids
@@ -1921,11 +1938,13 @@ handle_coxmod <- function(mc, qnodes, id_var, unique_id_list, sparse,
   
   # Return list
   ret <- nlist(mod, entrytime, eventtime, d, x, xtemp, xbar, idlist, ids,
-               qpts, qwts, qlim, tvc, K, Npat, model_frame = mf1)
+               qpts, qwts, qlim, tvc, K, Npat, model_frame = mf1, 
+               uindices = as.integer(factor(idvec)))
   if (terminating) {
     ret$recurtime <- recurtime
-    ret$recurids <- recurids
-    ret$recurNi <- recurNi
+    ret$recurids  <- recurids
+    ret$Nri       <- Nri
+    ret$Nrtotal   <- Nrtotal
   }
   ret
 }

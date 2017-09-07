@@ -86,6 +86,10 @@ transformed parameters {
   vector[e_K] e_beta;               // log hazard ratios
   vector[e_A] e_alpha;              // assoc params
   vector[basehaz_df] e_aux;         // basehaz params  
+  vector[has_recurrent] e_fbeta;    // coef on frailty term in event submodel
+  vector[r_K] r_beta;               // log hazard ratios
+  vector[basehaz_df*has_recurrent] r_aux; // basehaz params 
+  vector[Npat] frailty; // frailty terms
   #include "tparameters_mvglm.stan" // defines aux, beta, b{_not_by_model}, theta_L
   e_beta = generate_beta(e_z_beta, e_prior_dist, e_prior_mean, 
                          e_prior_scale, e_prior_df, e_global, e_local,
@@ -102,10 +106,9 @@ transformed parameters {
                          r_global_prior_scale, r_ool, r_mix);  
   r_aux  = generate_aux(r_aux_unscaled, r_prior_dist_for_aux,
                         r_prior_mean_for_aux, r_prior_scale_for_aux);
-  e_fbeta = generate_beta(e_z_fbeta, e_prior_dist_for_frscale, e_prior_mean_for_frscale, 
-                         e_prior_scale_for_frscale, e_prior_df_for_frscale);  
-  u = generate_beta(z_u, e_prior_dist_for_frailty, e_prior_mean_for_frailty, 
-                    e_prior_scale_for_frailty, e_prior_df_for_frailty);  
+  e_fbeta = generate_aux(e_z_fbeta, e_prior_dist_for_frscale, e_prior_mean_for_frscale, 
+                         e_prior_scale_for_frscale);  
+  frailty = generate_aux(z_frailty, 1, frailty_mean, frailty_sd);  
   if (t > 0) {
     theta_L = make_theta_L(len_theta_L, p, 1.0, tau, scale, zeta, rho, z_T);
     b_not_by_model = make_b(z_b, theta_L, p, l);
@@ -143,7 +146,7 @@ model {
   if (e_has_intercept == 1) e_eta_q = e_eta_q + e_gamma[1];
   else e_eta_q = e_eta_q + dot_product(e_xbar, e_beta);     
   if (has_recurrent == 1) {
-    e_eta_q = e_eta_q + e_fbeta * 
+    e_eta_q = e_eta_q + e_fbeta[1] * frailty[e_uindices];
   }
   if (assoc == 1) { 
     // declares y_eta_q{_eps,_lag,_auc}, y_eta_qwide{_eps,_lag,_auc}, 
@@ -159,40 +162,58 @@ model {
   
   //----- Log-lik for recurrent event submodel (GK quadrature)
   
-  // Recurrent event submodel: linear predictor at event and quad times
-  if (r_K > 0) r_eta_q = r_Xq * r_beta;
-  else r_eta_q = rep_vector(0.0, nrow_r_Xq);
-  if (r_has_intercept == 1) r_eta_q = r_eta_q + r_gamma[1];
-  else r_eta_q = r_eta_q + dot_product(r_xbar, r_beta);     
-  { 
-    // declares log_basehaz, ll_{haz_q,haz_eventtime,surv_eventtime,event}
-	  #include "recur_lp.stan" // increments target with event log-lik
-  }  
+  if (has_recurrent == 1) {
+    // Recurrent event submodel: linear predictor at event and quad times
+    if (r_K > 0) r_eta_q = r_Xq * r_beta;
+    else r_eta_q = rep_vector(0.0, nrow_r_Xq);
+    if (r_has_intercept == 1) r_eta_q = r_eta_q + r_gamma[1];
+    else r_eta_q = r_eta_q + dot_product(r_xbar, r_beta); 
+    r_eta_q = r_eta_q + frailty[r_uindices];
+    { 
+      // declares log_basehaz, ll_{haz_q,haz_eventtime,surv_eventtime,event}
+  	  #include "recur_lp.stan" // increments target with event log-lik
+    }  
+  }
   
   //----- Log-priors
 
-  // increment target with priors for aux params 
+  // increment target with priors for longitudinal submodel params
   for (m in 1:M) { 
     if (has_aux[m] == 1) {
       aux_mark = sum(has_aux[1:m]);
       aux_lp(aux_unscaled[aux_mark], prior_dist_for_aux[m], prior_scale_for_aux[m], prior_df_for_aux[m])
     } 
   }
-  
-  // increment target with priors for betas and gammas 
   #include "priors_mvglm.stan"  
+  
+  // increment target with priors for event submodel params
   beta_lp(e_z_beta, e_prior_dist, e_prior_scale, e_prior_df, 
           e_global_prior_df, e_local, e_global, e_mix, e_ool)
-  beta_lp(a_z_beta, a_prior_dist, a_prior_scale, a_prior_df, 
-          a_global_prior_df, a_local, a_global, a_mix, a_ool)
+  beta_lp(e_z_alpha, e_prior_dist_for_assoc, e_prior_scale_for_assoc, 
+          e_prior_df_for_assoc, e_global_prior_df_for_assoc, e_local_for_assoc, 
+          e_global_for_assoc, e_mix_for_assoc, e_ool_for_assoc)
+  basehaz_lp(e_aux_unscaled, e_prior_dist_for_aux, 
+             e_prior_scale_for_aux, e_prior_df_for_aux)
   if (e_has_intercept == 1) 
     gamma_lp(e_gamma[1], e_prior_dist_for_intercept, e_prior_mean_for_intercept, 
              e_prior_scale_for_intercept, e_prior_df_for_intercept);  
-   
-  // increment target with priors for basehaz params
-  basehaz_lp(e_aux_unscaled, e_prior_dist_for_aux, 
-             e_prior_scale_for_aux, e_prior_df_for_aux)
   
+  // increment target with priors for recurrent event submodel params
+  if (has_recurrent == 1) {
+    gamma_lp(e_z_fbeta, e_prior_dist_for_frscale, e_prior_mean_for_frscale[1],
+             e_prior_scale_for_frscale[1], e_prior_df_for_frscale[1])
+    beta_lp(r_z_beta, r_prior_dist, r_prior_scale, r_prior_df, 
+            r_global_prior_df, r_local, r_global, r_mix, r_ool)
+    basehaz_lp(r_aux_unscaled, r_prior_dist_for_aux,
+               r_prior_scale_for_aux, r_prior_df_for_aux)
+    if (r_has_intercept == 1) 
+      gamma_lp(r_gamma[1], r_prior_dist_for_intercept, r_prior_mean_for_intercept, 
+               r_prior_scale_for_intercept, r_prior_df_for_intercept);
+    // frailty terms
+    target += normal_lpdf(z_u | 0, 1);
+  }
+
+  // increment target with priors for group-specific params
   if (t > 0) decov_lp(z_b, z_T, rho, zeta, tau, 
                       regularization, delta, shape, t, p);
 }

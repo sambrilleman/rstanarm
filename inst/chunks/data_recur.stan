@@ -9,6 +9,7 @@ int<lower=0,upper=2> r_prior_dist_for_intercept;
 int<lower=0,upper=3> r_prior_dist_for_aux; // prior for basehaz params
 
 // data for recurrent event submodel
+int<lower=0,upper=1> has_recurrent; // 1 = has recurrent event submodel
 int<lower=0> r_K;           // num. of predictors in event submodel
 int<lower=0,upper=1> r_has_intercept; // 1 = yes
 int<lower=0> nrow_r_Xq;     // num. rows in event predictor matrix at quad points
@@ -17,3 +18,7 @@ vector[nrow_r_Xq] r_times;  // event times and unstandardised quadrature points
 matrix[nrow_r_Xq,basehaz_df] r_basehaz_X; // design matrix (basis terms) for baseline hazard
 vector[nrow_r_Xq] r_d;      // event indicator, followed by dummy indicator for quadpoints
 vector[r_K] r_xbar;         // predictor means (event submodel)
+int<lower=0> Nri[Npat];     // num. of recurrent events for each individual
+int<lower=0> Nrtotal;       // total num. of recurrent events
+int<lower=0,upper=Npat> e_uindices[nrow_e_Xq];  // indexing for frailty terms in recurrent event submodel
+int<lower=0,upper=Npat> r_uindices[nrow_r_Xq];  // indexing for frailty terms in recurrent event submodel

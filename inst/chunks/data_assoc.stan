@@ -14,7 +14,7 @@
   int<lower=0> size_which_coef[M];      // num. of shared random effects incl fixed component for each long submodel
   int<lower=1> which_coef_zindex[sum_size_which_coef]; // which random effects are shared incl fixed component
   int<lower=1> which_coef_xindex[sum_size_which_coef]; // which fixed effects are shared
-  int<lower=0,upper=a_K> sum_a_K_data;  // total num pars used in assoc*data interactions
+  int<lower=0,upper=e_A> sum_a_K_data;  // total num pars used in assoc*data interactions
   int<lower=0,upper=sum_a_K_data> a_K_data[M*4]; // num pars used in assoc*data interactions, by submodel and by ev/es/mv/ms interactions
   int<lower=0> sum_size_which_interactions; // total num pars used in assoc*assoc interactions
   int<lower=0,upper=sum_size_which_interactions> size_which_interactions[M*4]; // num pars used in assoc*assoc interactions, by submodel and by evev/evmv/mvev/mvmv interactions

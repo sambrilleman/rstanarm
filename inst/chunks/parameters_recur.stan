@@ -1,7 +1,8 @@
-int<lower=0,upper=1> has_recurrent; // 1 = has recurrent event submodel
 real r_gamma[r_has_intercept]; // intercept for event submodel 
 vector[r_K] r_z_beta;          // primitive log hazard ratios
-real e_z_fbeta[has_recurrent]; // coef to scale frailty term in event submodel 
+vector[has_recurrent] e_z_fbeta; // coef to scale frailty term in event submodel 
+vector[Npat] z_frailty; // standardised frailty terms
+vector<lower=0>[has_recurrent] frailty_sd;
 
 // unscaled basehaz params, either:
 //   - weibull shape parameter
