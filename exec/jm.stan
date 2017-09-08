@@ -101,14 +101,16 @@ transformed parameters {
                           e_mix_for_assoc);         
   e_aux  = generate_aux(e_aux_unscaled, e_prior_dist_for_aux,
                         e_prior_mean_for_aux, e_prior_scale_for_aux);
-  r_beta = generate_beta(r_z_beta, r_prior_dist, r_prior_mean, 
-                         r_prior_scale, r_prior_df, r_global, r_local,
-                         r_global_prior_scale, r_ool, r_mix);  
-  r_aux  = generate_aux(r_aux_unscaled, r_prior_dist_for_aux,
-                        r_prior_mean_for_aux, r_prior_scale_for_aux);
-  e_fbeta = generate_aux(e_z_fbeta, e_prior_dist_for_frscale, e_prior_mean_for_frscale, 
-                         e_prior_scale_for_frscale);  
-  frailty = generate_aux(z_frailty, 1, frailty_mean, frailty_sd);  
+  if (has_recurrent == 1) {
+    r_beta = generate_beta(r_z_beta, r_prior_dist, r_prior_mean, 
+                           r_prior_scale, r_prior_df, r_global, r_local,
+                           r_global_prior_scale, r_ool, r_mix);  
+    r_aux  = generate_aux(r_aux_unscaled, r_prior_dist_for_aux,
+                          r_prior_mean_for_aux, r_prior_scale_for_aux);
+    e_fbeta = generate_aux(e_z_fbeta, e_prior_dist_for_frscale, e_prior_mean_for_frscale, 
+                           e_prior_scale_for_frscale);  
+    frailty = generate_aux(z_frailty, 1, frailty_mean, frailty_sd);  
+  }
   if (t > 0) {
     theta_L = make_theta_L(len_theta_L, p, 1.0, tau, scale, zeta, rho, z_T);
     b_not_by_model = make_b(z_b, theta_L, p, l);
