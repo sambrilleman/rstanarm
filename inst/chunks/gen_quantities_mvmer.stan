@@ -26,9 +26,9 @@
   }
   {
     int aux_mark = 1; // indexing for auxiliary parameters in m loop
-    //include "make_eta.stan" // defines eta
+    #include "make_eta.stan" // defines eta
     if (t > 0) {
-      //include "eta_add_Zb.stan"
+      #include "eta_add_Zb.stan"
     } 
 	
 	  mark = 1;  // reset indexing for alphas before new m loop
@@ -40,9 +40,9 @@
         else if (has_intercept_upb[m] == 1) alpha[mark] = alpha[mark] - max(eta_tmp);
 	      mark = mark + 1;	  
 	    }
-	    //include "eta_intercept_mvmer.stan"	// adds intercept or shifts eta
+	    #include "eta_intercept_mvmer.stan"	// adds intercept or shifts eta
       if (family[m] == 8) {  // poisson-gamma mixture
-	      //include "eta_add_noise_mvmer.stan"
+	      #include "eta_add_noise_mvmer.stan"
       }    
       eta_tmp = evaluate_mu(eta_tmp, family[m], link[m]);
 	

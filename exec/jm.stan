@@ -113,7 +113,7 @@ transformed parameters {
     theta_L = make_theta_L(len_theta_L, p, 1.0, tau, scale, zeta, rho, z_T);
     b_not_by_model = make_b(z_b, theta_L, p, l);
     if (M == 1) b = b_not_by_model;
-	else b = reorder_b(b_not_by_model, p, pmat, q1, q2, qmat, l, M);
+	  else b = reorder_b(b_not_by_model, p, pmat, q1, q2, qmat, l, M);
   }
 }
 model {
@@ -126,7 +126,7 @@ model {
   #include "make_eta.stan" // defines eta
   if (t > 0) {
     #include "eta_add_Zb.stan"
-  } 
+  }
   for (m in 1:M) {
     vector[NM[m]] eta_tmp;	            // eta for just one submodel 
     eta_tmp = eta[idx[m,1]:idx[m,2]];   // eta for just one submodel 
@@ -200,7 +200,7 @@ model {
   
   // increment target with priors for recurrent event submodel params
   if (has_recurrent == 1) {
-    gamma_lp(e_z_fbeta, e_prior_dist_for_frscale, e_prior_mean_for_frscale[1],
+    gamma_lp(e_z_fbeta[1], e_prior_dist_for_frscale, e_prior_mean_for_frscale[1],
              e_prior_scale_for_frscale[1], e_prior_df_for_frscale[1])
     beta_lp(r_z_beta, r_prior_dist, r_prior_scale, r_prior_df, 
             r_global_prior_df, r_local, r_global, r_mix, r_ool)
@@ -210,7 +210,7 @@ model {
       gamma_lp(r_gamma[1], r_prior_dist_for_intercept, r_prior_mean_for_intercept, 
                r_prior_scale_for_intercept, r_prior_df_for_intercept);
     // frailty terms
-    target += normal_lpdf(z_u | 0, 1);
+    target += normal_lpdf(z_frailty | 0, 1);
   }
 
   // increment target with priors for group-specific params
