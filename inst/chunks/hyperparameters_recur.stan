@@ -13,4 +13,4 @@ real<lower=0>               r_prior_df_for_intercept;
 vector<lower=0>[basehaz_df] r_prior_df_for_aux; 
 real<lower=0>               r_global_prior_scale; // for hs priors only
 real<lower=0>               r_global_prior_df;  
-vector[1]                   frailty_mean;
+real                        frailty_mean;

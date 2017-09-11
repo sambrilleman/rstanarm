@@ -1,6 +1,6 @@
 vector[nrow_r_Xq] log_basehaz;  // baseline hazard evaluated at quadpoints
 vector[nrow_r_Xq] ll_haz_q;     // log hazard contribution to the log likelihood for the event model at recurrent event time and quad points
-vector[Npat] ll_haz_recurtime;  // log hazard contribution to the log likelihood for the event model AT the recurrent event time only
+vector[Nrtotal] ll_haz_recurtime;  // log hazard contribution to the log likelihood for the event model AT the recurrent event time only
 vector[Npat_times_quadnodes] ll_surv_eventtime; // log survival contribution to the log likelihood for the event model AT the event time
 real ll_recur;                  // log likelihood for the recurrent event model  
 

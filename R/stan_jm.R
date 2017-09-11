@@ -593,7 +593,8 @@ stan_jm <- function(formulaLong, dataLong, formulaEvent, dataEvent,
   # Create call for longitudinal submodel  
   y_mc <- mc
   y_mc <- strip_nms(y_mc, "Long") 
-  y_mc$formulaEvent <- y_mc$dataEvent <- NULL
+  y_mc$formulaEvent <- y_mc$dataEvent <- 
+    y_mc$formulaRecur <- y_mc$dataRecur <- NULL
 
   # Create call for each longitudinal submodel separately
   m_mc <- lapply(1:M, function(m, old_call, env) {
@@ -967,7 +968,7 @@ stan_jm <- function(formulaLong, dataLong, formulaEvent, dataEvent,
       as.array(r_prior_aux_stuff$prior_mean),  
     r_prior_scale_for_aux      = as.array(r_prior_aux_stuff$prior_scale), 
     r_prior_df_for_aux         = as.array(r_prior_aux_stuff$prior_df),
-    frailty_mean               = as.array(0.0),
+    frailty_mean               = c(0.0),
     
     # flags
     prior_PD = as.integer(prior_PD)
@@ -1391,11 +1392,13 @@ stan_jm <- function(formulaLong, dataLong, formulaEvent, dataEvent,
             if (standata$e_K) "e_beta",
             if (has_recurrent) "e_fbeta",
             if (standata$e_A) "e_alpha",
+            if (has_recurrent && standata$r_has_intercept) "r_gamma",
             if (standata$r_K) "r_beta",
             if (standata$q) "b",
             if (standata$sum_has_aux) "aux",
             if (length(standata$basehaz_X)) "e_aux",
             if (has_recurrent && length(standata$basehaz_X)) "r_aux",
+            if (has_recurrent) "frailty_sd",
             if (standata$len_theta_L) "theta_L",
             "mean_PPD")
             
@@ -1467,7 +1470,7 @@ stan_jm <- function(formulaLong, dataLong, formulaEvent, dataEvent,
   }
   if (has_recurrent) {
     r_nms <- if (ncol(r_mod_stuff$xtemp)) paste0("Recur|", colnames(r_mod_stuff$xtemp))    
-    r_int_nms <- if (r_has_intercept) "Recur|(Intercept)"
+    r_int_nms <- if (e_has_intercept) "Recur|(Intercept)"
     r_aux_nms <- if (basehaz$type == 1L) "Recur|weibull-shape" else paste0("Recur|basehaz-coef", seq(basehaz$df))
     frailtysd_nms <- "SD_for_frailty"
     frscale_nms <- "Event|coef_on_frailty"
@@ -1509,6 +1512,7 @@ stan_jm <- function(formulaLong, dataLong, formulaEvent, dataEvent,
                  e_nms,
                  if (has_recurrent) frscale_nms,
                  a_nms,
+                 r_int_nms,
                  if (has_recurrent) r_nms,
                  if (length(standata$q)) c(paste0("b[", b_nms, "]")),
                  y_aux_nms,
@@ -1896,7 +1900,7 @@ handle_coxmod <- function(mc, qnodes, id_var, unique_id_list, sparse,
       d <- NULL
       ids <- unique(idlist)
       names(entrytime) <- names(eventtime) <- ids
-      names(recurtimes) <- recurids
+      names(recurtime) <- recurids
     } else stop("Only 'counting' type Surv objects (ie. start/stop) notation 
                 are allowed on the LHS of the recurrent event submodel formula")
   }
@@ -3513,7 +3517,7 @@ set_sampling_args_for_jm <- function(object, user_dots = list(),
   if (!"iter" %in% unms) args$iter <- 1000
   if (!"chains" %in% unms) args$chains <- 3
   if (!"refresh" %in% unms) args$refresh <- args$iter / 25
-  if (!"save_warmup" %in% unms) args$save_warmup <- FALSE
+  if (!"save_warmup" %in% unms) args$save_warmup <- TRUE
   
   return(args)
 }  

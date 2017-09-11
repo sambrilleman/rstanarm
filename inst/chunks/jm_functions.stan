@@ -57,6 +57,27 @@
     }
     return aux;	
   }
+
+  /** 
+  * Generate frailty parameters using unscaled params and prior information
+  *
+  * @param aux_unscaled Vector of unscaled frailty params
+  * @param prior_dist An integer indicating the prior distribution
+  * @param prior_{mean,scale} Prior means and scales
+  * @return A vector
+  */  
+  vector generate_frailty(vector z_frailty, int prior_dist, real prior_mean, real prior_scale) {
+    vector[rows(z_frailty)] frailty;
+    if (prior_dist == 0) // none
+      frailty = z_frailty;
+    else {
+      frailty = prior_scale * z_frailty;
+      if (prior_dist <= 2) // normal or student_t
+        frailty = frailty + prior_mean;
+    }
+    return frailty;	
+  }
+
   
   /** 
   * Add intercept term to linear predictor for submodel m 

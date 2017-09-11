@@ -109,7 +109,7 @@ transformed parameters {
                           r_prior_mean_for_aux, r_prior_scale_for_aux);
     e_fbeta = generate_aux(e_z_fbeta, e_prior_dist_for_frscale, e_prior_mean_for_frscale, 
                            e_prior_scale_for_frscale);  
-    frailty = generate_aux(z_frailty, 1, frailty_mean, frailty_sd);  
+    frailty = generate_frailty(z_frailty, 1, frailty_mean, frailty_sd[1]);  
   }
   if (t > 0) {
     theta_L = make_theta_L(len_theta_L, p, 1.0, tau, scale, zeta, rho, z_T);
@@ -213,6 +213,7 @@ model {
                r_prior_scale_for_intercept, r_prior_df_for_intercept);
     // frailty terms
     target += normal_lpdf(z_frailty | 0, 1);
+    target += normal_lpdf(frailty_sd | 0, 2);
   }
 
   // increment target with priors for group-specific params
