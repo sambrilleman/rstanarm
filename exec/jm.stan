@@ -89,7 +89,7 @@ transformed parameters {
   vector[has_recurrent] e_fbeta;    // coef on frailty term in event submodel
   vector[r_K] r_beta;               // log hazard ratios
   vector[basehaz_df*has_recurrent] r_aux; // basehaz params 
-  vector[Npat] frailty; // frailty terms
+  vector[Npat*has_recurrent] frailty; // frailty terms
   #include "tparameters_mvglm.stan" // defines aux, beta, b{_not_by_model}, theta_L
   e_beta = generate_beta(e_z_beta, e_prior_dist, e_prior_mean, 
                          e_prior_scale, e_prior_df, e_global, e_local,
