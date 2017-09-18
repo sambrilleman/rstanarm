@@ -827,6 +827,14 @@ is.surv <- function(x) {
   x$stan_function %in% c("stan_jm")
 }
 
+# Test if object contains a recurrent event model
+#
+# @param x An object to be tested.
+is.recur <- function(x) {
+  (x$stan_function %in% c("stan_jm")) &&
+    (!is.null(x$call$formulaRecur))
+}
+
 # Throw error if object isn't a stanmvreg object
 # 
 # @param x The object to test.
@@ -914,12 +922,15 @@ collect_nms <- function(x, M, stub = "Long", ...) {
   e_extra <- c(grep("^Event\\|weibull-shape|^Event\\|basehaz-coef", x, ...))         
   e <- setdiff(e, e_extra)
   a <- grep(mod2rx("^Assoc"), x, ...)
+  r <- grep(mod2rx("^Recur"), x, ...)     
+  r_extra <- c(grep("^Recur\\|weibull-shape|^Recur\\|basehaz-coef", x, ...))         
+  r <- setdiff(r, r_extra)
   b <- b_names(x, ...)
   y_b <- lapply(1:M, function(m) b_names_M(x, m, stub = stub, ...))
   alpha <- grep("^.{5}\\|\\(Intercept\\)", x, ...)      
   alpha <- c(alpha, grep("^", stub, ".{1}\\|\\(Intercept\\)", x, ...))      
   beta <- setdiff(c(unlist(y), e, a), alpha)  
-  nlist(y, y_extra, y_b, e, e_extra, a, b, alpha, beta, ppd) 
+  nlist(y, y_extra, y_b, e, e_extra, a, r, r_extra, b, alpha, beta, ppd) 
 }
 
 # Grep for "b" parameters (ranef), can optionally be specified
@@ -970,12 +981,16 @@ mod2rx <- function(x, stub = "Long") {
     c("^Long[1-9]\\|")
   } else if (x == "^Event") {
     c("^Event\\|")
+  } else if (x == "^Recur") {
+    c("^Recur\\|")
   } else if (x == "^Assoc") {
     c("^Assoc\\|")
   } else if (x == "Long") {
     c("Long[1-9]\\|")
   } else if (x == "Event") {
     c("Event\\|")
+  } else if (x == "Recur") {
+    c("Recur\\|")
   } else if (x == "Assoc") {
     c("Assoc\\|")
   } else if (x == "^y") {

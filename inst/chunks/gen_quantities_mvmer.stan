@@ -3,7 +3,7 @@
   int mark = 1;  // indexing for alphas within m loop
   for (m in 1:M) {
     if (has_intercept[m] == 1) {
-	    if (dense_X) {  // dense X
+	    if ((dense_X == 1) && (KM[m] > 0)) {  // dense X
         int K1 = idx_K[m,1];  // indexing for beta
         int K2 = idx_K[m,2];  // indexing for beta
         if (has_intercept_nob[m] == 1)

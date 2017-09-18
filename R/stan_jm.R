@@ -509,7 +509,7 @@ stan_jm <- function(formulaLong, dataLong, formulaEvent, dataEvent,
                     priorLong = normal(), priorLong_intercept = normal(), 
                     priorLong_aux = cauchy(0, 5), priorEvent = normal(), 
                     priorEvent_intercept = normal(), priorEvent_aux = cauchy(0, 50),
-                    priorEvent_assoc = normal(), priorEvent_frscale = normal(0, 5),
+                    priorEvent_assoc = normal(), priorEvent_frscale = normal(),
                     priorRecur = normal(), priorRecur_intercept = normal(), 
                     priorRecur_aux = cauchy(0, 50), priorFrailty = normal(),
                     priorAssoc = normal(), prior_covariance = decov(), prior_PD = FALSE, 
@@ -3356,10 +3356,15 @@ rename_t_and_cauchy <- function(prior_stuff, has) {
 generate_init_function <- function(y_mod_stuff, e_mod_stuff, standata) {
   
   # Initial values for intercepts, coefficients and aux parameters
-  est <- lapply(y_mod_stuff, function(x) summary(x$mod)$coefficients[, "Estimate"])
+  est <- lapply(y_mod_stuff, function(x) summary(x$mod)$coefficients[, "Estimate", drop = FALSE])
   xbar      <- fetch(y_mod_stuff, "xbar")
-  gamma     <- lapply(seq_along(y_mod_stuff), function(m) 
-    return_intercept(est[[m]]) - xbar[[m]] %*% drop_intercept(est[[m]]))
+  gamma     <- lapply(seq_along(y_mod_stuff), function(m) {
+    if (y_mod_stuff[[m]]$has_intercept && y_mod_stuff[[m]]$K) {
+      return_intercept(est[[m]]) - xbar[[m]] %*% drop_intercept(est[[m]])
+    } else if (y_mod_stuff[[m]]$has_intercept) {
+      return_intercept(est[[m]])
+    } else NULL
+  })
   gamma_nob <- gamma[as.logical(standata$has_intercept_nob)]
   gamma_lob <- gamma[as.logical(standata$has_intercept_lob)]
   gamma_upb <- gamma[as.logical(standata$has_intercept_upb)]
@@ -3617,14 +3622,14 @@ fetch_array <- function(x, y) {
 
 # Drop intercept from a vector of named coefficients
 drop_intercept <- function(x) { 
-  sel <- which("(Intercept)" %in% names(x))
-  if (length(sel)) x[-sel] else x
+  sel <- which("(Intercept)" %in% rownames(x))
+  if (length(sel)) x[-sel, ] else x
 }
 
 # Return intercept from a vector of named coefficients
 return_intercept <- function(x) {
-  sel <- which("(Intercept)" %in% names(x))
-  if (length(sel)) x[sel] else NULL
+  sel <- which("(Intercept)" %in% rownames(x))
+  if (length(sel)) x[sel, ] else NULL
 }
 
 # Standardise a coefficient

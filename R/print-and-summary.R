@@ -173,6 +173,7 @@ print.stanmvreg <- function(x, digits = 3, ...) {
   M <- x$n_markers
   mvmer <- is.mvmer(x)
   surv <- is.surv(x)
+  recur <- is.recur(x)
   jm <- is.jm(x)
   stubs <- paste0("(", get_stub(x), 1:M, "):")
   cat(x$stan_function)
@@ -186,6 +187,10 @@ print.stanmvreg <- function(x, digits = 3, ...) {
     cat("\n formula (Event):", formula_string(formula(x, m = "Event")))
     cat("\n baseline hazard:", x$basehaz$type_name) 
   }
+  if (recur) {
+    cat("\n formula (Recur):", formula_string(formula(x, m = "Recur")))
+    cat("\n baseline hazard:", x$basehaz$type_name) 
+  }  
   if (jm) {
     sel <- grep("^which", rownames(x$assoc), invert = TRUE, value = TRUE)
     assoc <- lapply(1:M, function(m) {
@@ -249,6 +254,28 @@ print.stanmvreg <- function(x, digits = 3, ...) {
     .printfr(estimates, digits, ...)
   }
   
+  # Estimates table for recurrent event submodel
+  if (recur) {
+    cat("\nRecurrent event submodel:\n")   
+    coef_mat <- mat[, c(nms$r, nms$r_extra), drop = FALSE]
+    
+    # Calculate median and MAD
+    estimates <- .median_and_madsd(coef_mat)
+    
+    # Add column with eform
+    estimates <- cbind(estimates, 
+                       "exp(Median)" = c(exp(estimates[nms$r, "Median"]), 
+                                         rep(NA, length(nms$r_extra))))
+    
+    rownames(estimates) <- gsub("^Recur\\|", "", rownames(estimates))  
+    .printfr(estimates, digits, ...)
+
+    cat("\nFrailty terms (estimated on log hazard scale):\n")
+    .printfr(
+      .median_and_madsd(mat[, "SD_for_frailty", drop = FALSE]),
+      digits, ...)
+  }
+  
   # Estimates table for group-level random effects
   if (mvmer) {
     cat("\nGroup-level error terms:\n") 
@@ -263,7 +290,7 @@ print.stanmvreg <- function(x, digits = 3, ...) {
         if (is.jm(x)) "longitudinal outcomes:\n" else "y (X = xbar):\n")
     .printfr(ppd_estimates, digits, ...)
   }
-  
+    
   cat("\n------\n")
   cat("For info on the priors used see help('prior_summary.stanreg').")
   
