@@ -270,10 +270,14 @@ print.stanmvreg <- function(x, digits = 3, ...) {
     rownames(estimates) <- gsub("^Recur\\|", "", rownames(estimates))  
     .printfr(estimates, digits, ...)
 
-    cat("\nFrailty terms (estimated on log hazard scale):\n")
-    .printfr(
-      .median_and_madsd(mat[, "SD_for_frailty", drop = FALSE]),
-      digits, ...)
+    frailty <- x$frailty
+    cat(paste0(
+      "\nFrailty terms", 
+      if (frailty == "lognormal") " (on log hazard scale)",
+      ":\n"))
+    frailty_aux_estimates <- 
+      .median_and_madsd(mat[, nms$f_aux, drop = FALSE])
+    .printfr(frailty_aux_estimates, digits, ...)
   }
   
   # Estimates table for group-level random effects

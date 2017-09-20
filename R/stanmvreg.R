@@ -28,6 +28,7 @@ stanmvreg <- function(object) {
   M          <- object$M
   mvmer      <- is.mvmer(object)
   surv       <- is.surv(object)
+  recur      <- is.recur(object)
   jm         <- is.jm(object)
   stub       <- if (jm) "Long" else "y"
   
@@ -119,6 +120,9 @@ stanmvreg <- function(object) {
     out$data <- if (!jm) object$data else NULL
     out$coxmod <- object$e_mod_stuff$mod    
     out$coxmod_stuff <- object$e_mod_stuff    
+  }
+  if (recur) {
+    out$frailty <- object$frailty
   }
   if (jm) {
     out$time_var <- object$time_var

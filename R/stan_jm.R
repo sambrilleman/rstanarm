@@ -499,19 +499,18 @@
 #' @importFrom lme4 lmerControl glmerControl glmer
 #' 
 stan_jm <- function(formulaLong, dataLong, formulaEvent, dataEvent, 
-                    formulaRecur, dataRecur, time_var, 
-                    id_var, family = gaussian, assoc = "etavalue", 
-                    lag_assoc = 0, grp_assoc, dataAssoc,
+                    formulaRecur, time_var, id_var, family = gaussian, 
+                    assoc = "etavalue", lag_assoc = 0, grp_assoc, dataAssoc,
                     basehaz = c("weibull", "bs", "piecewise"), basehaz_ops, 
-                    quadnodes = 15, init = "prefit", 
+                    quadnodes = 15, init = "prefit", frailty = "lognormal", 
                     na.action = getOption("na.action", "na.omit"), weights, 
                     offset, contrasts, ...,				          
                     priorLong = normal(), priorLong_intercept = normal(), 
                     priorLong_aux = cauchy(0, 5), priorEvent = normal(), 
                     priorEvent_intercept = normal(), priorEvent_aux = cauchy(0, 50),
-                    priorEvent_assoc = normal(), priorEvent_frscale = normal(),
+                    priorEvent_assoc = normal(), priorEvent_lambda = normal(),
                     priorRecur = normal(), priorRecur_intercept = normal(), 
-                    priorRecur_aux = cauchy(0, 50), priorFrailty = normal(),
+                    priorRecur_aux = cauchy(0, 50), priorFrailty_aux = normal(),
                     priorAssoc = normal(), prior_covariance = decov(), prior_PD = FALSE, 
                     algorithm = c("sampling", "meanfield", "fullrank"), 
                     adapt_delta = NULL, max_treedepth = NULL, QR = FALSE, 
@@ -543,8 +542,7 @@ stan_jm <- function(formulaLong, dataLong, formulaEvent, dataEvent,
   if (missing(grp_assoc))   grp_assoc   <- NULL
   if (missing(dataAssoc))   dataAssoc   <- NULL 
   if (missing(formulaRecur))formulaRecur<- NULL 
-  if (missing(dataRecur))   dataRecur   <- NULL 
-  
+
   # Validate arguments
   basehaz   <- match.arg(basehaz)
   algorithm <- match.arg(algorithm)
@@ -582,19 +580,21 @@ stan_jm <- function(formulaLong, dataLong, formulaEvent, dataEvent,
   mc   <- match.call(expand.dots = FALSE)
   mc$time_var <- mc$id_var <- mc$assoc <- mc$lag_assoc <- mc$grp_assoc <- 
     mc$dataAssoc <- mc$basehaz <- mc$basehaz_ops <-
-    mc$df <- mc$knots <- mc$quadnodes <- NULL
+    mc$df <- mc$knots <- mc$quadnodes <- mc$frailty <- NULL
   mc$priorLong <- mc$priorLong_intercept <- mc$priorLong_aux <-
     mc$priorEvent <- mc$priorEvent_intercept <- mc$priorEvent_aux <-
-    mc$priorAssoc <- mc$prior_covariance <-  mc$prior_PD <- mc$algorithm <- 
-    mc$scale <- mc$concentration <- mc$shape <- mc$init <- mc$adapt_delta <- 
-    mc$max_treedepth <- mc$... <- mc$QR <- NULL
+    mc$priorEvent_assoc <- mc$priorEvent_lambda <- 
+    mc$priorRecur <- mc$priorRecur_intercept <- mc$priorRecur_aux <-
+    mc$priorFrailty_aux <- mc$prior_covariance <- mc$prior_PD <- 
+    mc$algorithm <- mc$scale <- mc$concentration <- mc$shape <- 
+    mc$init <- mc$adapt_delta <- mc$max_treedepth <- mc$... <- mc$QR <- NULL
   mc$weights <- NULL 
 
   # Create call for longitudinal submodel  
   y_mc <- mc
-  y_mc <- strip_nms(y_mc, "Long") 
   y_mc$formulaEvent <- y_mc$dataEvent <- 
-    y_mc$formulaRecur <- y_mc$dataRecur <- NULL
+    y_mc$formulaRecur <- y_mc$frailty <- NULL
+  y_mc <- strip_nms(y_mc, "Long") 
 
   # Create call for each longitudinal submodel separately
   m_mc <- lapply(1:M, function(m, old_call, env) {
@@ -610,18 +610,15 @@ stan_jm <- function(formulaLong, dataLong, formulaEvent, dataEvent,
 
   # Create call for event submodel
   e_mc <- mc
+  e_mc$formulaLong <- e_mc$dataLong <- e_mc$family <- e_mc$formulaRecur <- NULL
   e_mc <- strip_nms(e_mc, "Event")
-  e_mc$formulaLong <- e_mc$dataLong <- e_mc$family <- 
-    e_mc$formulaRecur <- e_mc$dataRecur <- NULL
   
   # Create call for recurrent event submodel
   has_recurrent <- !is.null(formulaRecur)
-  if (has_recurrent && is.null(dataRecur))
-    stop("'dataRecur' must be supplied when 'formulaRecur' is supplied.")
   r_mc <- mc
+  r_mc$formulaLong <- r_mc$dataLong <- r_mc$family <- r_mc$formulaEvent <- NULL
   r_mc <- strip_nms(r_mc, "Recur")
-  r_mc$formulaLong <- r_mc$dataLong <- r_mc$family <- 
-    r_mc$formulaEvent <- r_mc$dataEvent <- NULL
+  r_mc <- strip_nms(r_mc, "Event")
   
   # Is priorLong* already a list?
   priorLong           <- maybe_broadcast_priorarg(priorLong, M)
@@ -679,16 +676,17 @@ stan_jm <- function(formulaLong, dataLong, formulaEvent, dataEvent,
   # Data for recurrent event submodel
   #-----------------------------------
 
-  if (has_recurrent) {
-    
-    if (!id_var %in% colnames(dataRecur))
-      stop(paste0("Variable '", id_var, "' must be appear in dataRecur"), call. = FALSE)
-    
-    # Fit separate recurrent event submodel
+  # Fit separate recurrent event submodel
+  if (has_recurrent)
     r_mod_stuff <- handle_coxmod(r_mc, qnodes = quadnodes, id_var = id_var, 
                                  unique_id_list = unique_id_list, sparse = sparse,
                                  env = calling_env, terminating = FALSE)
-  }
+  
+  # Info on frailty distribution
+  supported_frailties <- c("lognormal", "gamma")
+  frailty_dist <- pmatch(frailty, supported_frailties, nomatch = 0L)
+  if (has_recurrent && frailty_dist == 0L)
+    stop("'frailty' must be one of ", paste(supported_frailties, collapse = ", "))
   
   #--------------------------------
   # Data for association structure
@@ -769,11 +767,11 @@ stan_jm <- function(formulaLong, dataLong, formulaEvent, dataEvent,
   ok_dists <- nlist("normal", student_t = "t", "cauchy", "hs", "hs_plus", 
                     "laplace", "lasso")
   ok_intercept_dists <- ok_dists[1:3]
-  ok_frailty_dists <- ok_dists[1]
-  ok_frscale_dists <- ok_dists[1]
+  ok_lambda_dists <- ok_dists[1] # coef on frailty term in terminating event model
   ok_y_aux_dists <- c(ok_dists[1:3], exponential = "exponential")
   ok_e_aux_dists <- ok_dists[1:3] # basehaz pars, terminating event
   ok_r_aux_dists <- ok_dists[1:3] # basehaz pars, recurrent event
+  ok_f_aux_dists <- ok_dists[1] # hyperparameters for frailty dist
   
   # Note: *_user_prior_*_stuff objects are stored unchanged for constructing 
   # prior_summary, while *_prior_*_stuff objects are autoscaled
@@ -837,23 +835,14 @@ stan_jm <- function(formulaLong, dataLong, formulaEvent, dataEvent,
       ok_dists = ok_dists
     )
   
-  e_user_prior_frscale_stuff <- e_prior_frscale_stuff <- 
+  e_user_prior_lambda_stuff <- e_prior_lambda_stuff <- 
     handle_glm_prior(
-      priorEvent_frscale, # prior for coefficient on frailty term
+      priorEvent_lambda, # prior for coefficient on frailty term
       nvars = 1,
       default_scale = 2.5,
       link = NULL,
-      ok_dists = ok_frscale_dists
+      ok_dists = ok_lambda_dists
     )  
-  
-  e_user_prior_frailty_stuff <- e_prior_frailty_stuff <- 
-    handle_glm_prior(
-      priorFrailty, 
-      nvars = 1,
-      default_scale = 2.5,
-      link = NULL,
-      ok_dists = ok_frailty_dists
-    )
   
   # Priors for recurrent event submodel
   r_user_prior_stuff <- r_prior_stuff <- 
@@ -883,6 +872,16 @@ stan_jm <- function(formulaLong, dataLong, formulaEvent, dataEvent,
       ok_dists = ok_r_aux_dists
     )
 
+  # Priors for frailty distribution hyperparameters
+  f_user_prior_aux_stuff <- f_prior_aux_stuff <- 
+    handle_glm_prior(
+      priorFrailty_aux, 
+      nvars = 1,
+      default_scale = 2.5,
+      link = NULL,
+      ok_dists = ok_f_aux_dists
+    )  
+  
   # Minimum scaling of priors
   y_prior_stuff           <- Map(autoscale_prior, y_prior_stuff, y_mod_stuff, QR = QR, use_x = TRUE)
   y_prior_intercept_stuff <- Map(autoscale_prior, y_prior_intercept_stuff, y_mod_stuff, QR = QR, use_x = FALSE)
@@ -890,15 +889,16 @@ stan_jm <- function(formulaLong, dataLong, formulaEvent, dataEvent,
   e_prior_stuff           <- autoscale_prior(e_prior_stuff, e_mod_stuff, QR = QR, use_x = TRUE)
   e_prior_intercept_stuff <- autoscale_prior(e_prior_intercept_stuff, e_mod_stuff, QR = QR, use_x = FALSE)
   e_prior_aux_stuff       <- autoscale_prior(e_prior_aux_stuff, e_mod_stuff, QR = QR, use_x = FALSE)
-  if (e_A)
-    e_prior_assoc_stuff <- autoscale_prior(e_prior_assoc_stuff, a_mod_stuff, QR = QR, use_x = FALSE, 
-                                           assoc = assoc, family = family)
+  if (e_A){
+    e_prior_assoc_stuff <- autoscale_prior(
+      e_prior_assoc_stuff, a_mod_stuff, QR = QR, use_x = FALSE, assoc = assoc, family = family)
+  }
   if (has_recurrent) {
-    # NB no prior scaling for frailty term, or coefficient on frailty term (yet)
     r_prior_stuff           <- autoscale_prior(r_prior_stuff, r_mod_stuff, QR = QR, use_x = TRUE)
     r_prior_intercept_stuff <- autoscale_prior(r_prior_intercept_stuff, r_mod_stuff, QR = QR, use_x = FALSE)
     r_prior_aux_stuff       <- autoscale_prior(r_prior_aux_stuff, r_mod_stuff, QR = QR, use_x = FALSE)
   }
+  # NB no prior scaling for frailty term, or coefficient on frailty term (yet)
   
   #-------------------------
   # Data for export to Stan
@@ -914,8 +914,7 @@ stan_jm <- function(formulaLong, dataLong, formulaEvent, dataEvent,
     e_prior_dist_for_intercept= e_prior_intercept_stuff$prior_dist,
     e_prior_dist_for_aux      = e_prior_aux_stuff$prior_dist,
     e_prior_dist_for_assoc    = e_prior_assoc_stuff$prior_dist,    
-    e_prior_dist_for_frailty  = e_prior_frailty_stuff$prior_dist,
-    e_prior_dist_for_frscale  = e_prior_frscale_stuff$prior_dist,    
+    e_prior_dist_for_lambda   = e_prior_lambda_stuff$prior_dist,    
     r_prior_dist              = r_prior_stuff$prior_dist,
     r_prior_dist_for_intercept= r_prior_intercept_stuff$prior_dist,
     r_prior_dist_for_aux      = r_prior_aux_stuff$prior_dist,
@@ -951,9 +950,9 @@ stan_jm <- function(formulaLong, dataLong, formulaEvent, dataEvent,
     e_prior_df_for_assoc       = e_prior_assoc_stuff$prior_df, 
     e_global_prior_scale_for_assoc = e_prior_assoc_stuff$global_prior_scale,
     e_global_prior_df_for_assoc    = e_prior_assoc_stuff$global_prior_df,
-    e_prior_mean_for_frscale   = as.array(e_prior_frscale_stuff$prior_mean),
-    e_prior_scale_for_frscale  = as.array(e_prior_frscale_stuff$prior_scale), 
-    e_prior_df_for_frscale     = as.array(e_prior_frscale_stuff$prior_df),
+    e_prior_mean_for_lambda    = as.array(e_prior_lambda_stuff$prior_mean),
+    e_prior_scale_for_lambda   = as.array(e_prior_lambda_stuff$prior_scale), 
+    e_prior_df_for_lambda      = as.array(e_prior_lambda_stuff$prior_df),
 
     # hyperparameters for recurrent event submodel priors
     r_prior_mean               = r_prior_stuff$prior_mean, 
@@ -968,8 +967,9 @@ stan_jm <- function(formulaLong, dataLong, formulaEvent, dataEvent,
       as.array(r_prior_aux_stuff$prior_mean),  
     r_prior_scale_for_aux      = as.array(r_prior_aux_stuff$prior_scale), 
     r_prior_df_for_aux         = as.array(r_prior_aux_stuff$prior_df),
-    frailty_mean               = c(0.0),
-    
+    f_prior_scale_for_aux      = c(f_prior_aux_stuff$prior_scale),
+    frailty_dist               = frailty_dist,
+
     # flags
     prior_PD = as.integer(prior_PD)
   )
@@ -1390,7 +1390,7 @@ stan_jm <- function(formulaLong, dataLong, formulaEvent, dataEvent,
             if (standata$K) "beta",
             if (standata$e_has_intercept) "e_gamma",
             if (standata$e_K) "e_beta",
-            if (has_recurrent) "e_fbeta",
+            if (has_recurrent) "e_lambda",
             if (standata$e_A) "e_alpha",
             if (has_recurrent && standata$r_has_intercept) "r_gamma",
             if (standata$r_K) "r_beta",
@@ -1398,7 +1398,7 @@ stan_jm <- function(formulaLong, dataLong, formulaEvent, dataEvent,
             if (standata$sum_has_aux) "aux",
             if (length(standata$basehaz_X)) "e_aux",
             if (has_recurrent && length(standata$basehaz_X)) "r_aux",
-            if (has_recurrent) "frailty_sd",
+            if (has_recurrent) "frailty_aux",
             if (standata$len_theta_L) "theta_L",
             "mean_PPD")
             
@@ -1469,11 +1469,11 @@ stan_jm <- function(formulaLong, dataLong, formulaEvent, dataEvent,
     a_nms <- c(a_nms, paste0("Assoc|", unlist(temp_g_nms)))
   }
   if (has_recurrent) {
+    e_lambda_nms <- "Event|coef_on_frailty"
     r_nms <- if (ncol(r_mod_stuff$xtemp)) paste0("Recur|", colnames(r_mod_stuff$xtemp))    
     r_int_nms <- if (e_has_intercept) "Recur|(Intercept)"
     r_aux_nms <- if (basehaz$type == 1L) "Recur|weibull-shape" else paste0("Recur|basehaz-coef", seq(basehaz$df))
-    frailtysd_nms <- "SD_for_frailty"
-    frscale_nms <- "Event|coef_on_frailty"
+    frailty_aux_nms <- if (frailty_dist == 1) "sd_for_frailty" else "inverse_theta"
   }
   
   # Sigma values in stanmat, and Sigma names
@@ -1510,7 +1510,7 @@ stan_jm <- function(formulaLong, dataLong, formulaEvent, dataEvent,
                  y_nms,
                  e_int_nms,
                  e_nms,
-                 if (has_recurrent) frscale_nms,
+                 if (has_recurrent) e_lambda_nms,
                  a_nms,
                  r_int_nms,
                  if (has_recurrent) r_nms,
@@ -1518,7 +1518,7 @@ stan_jm <- function(formulaLong, dataLong, formulaEvent, dataEvent,
                  y_aux_nms,
                  e_aux_nms,
                  if (has_recurrent) r_aux_nms,
-                 if (has_recurrent) frailtysd_nms,
+                 if (has_recurrent) frailty_aux_nms,
                  if (standata$len_theta_L) paste0("Sigma[", Sigma_nms, "]"),
                  paste0("Long", 1:M, "|mean_PPD"), 
                  "log-posterior")
@@ -1547,6 +1547,7 @@ stan_jm <- function(formulaLong, dataLong, formulaEvent, dataEvent,
                y = list_nms(fetch(y_mod_stuff, "y"), M),
                d = e_mod_stuff$d, eventtime = e_mod_stuff$eventtime,
                epsilon = if (standata$assoc_uses[2]) eps else NULL,
+               frailty = if (has_recurrent) frailty else NULL,
                dataLong, dataEvent, call, na.action, algorithm, 
                standata = NULL, terms = NULL, prior.info = prior_info,
                stan_function = "stan_jm")

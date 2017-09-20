@@ -925,12 +925,13 @@ collect_nms <- function(x, M, stub = "Long", ...) {
   r <- grep(mod2rx("^Recur"), x, ...)     
   r_extra <- c(grep("^Recur\\|weibull-shape|^Recur\\|basehaz-coef", x, ...))         
   r <- setdiff(r, r_extra)
+  f_aux <- c(grep("^sd_for_frailty$|^inverse_theta$", x, ...))         
   b <- b_names(x, ...)
   y_b <- lapply(1:M, function(m) b_names_M(x, m, stub = stub, ...))
   alpha <- grep("^.{5}\\|\\(Intercept\\)", x, ...)      
   alpha <- c(alpha, grep("^", stub, ".{1}\\|\\(Intercept\\)", x, ...))      
   beta <- setdiff(c(unlist(y), e, a), alpha)  
-  nlist(y, y_extra, y_b, e, e_extra, a, r, r_extra, b, alpha, beta, ppd) 
+  nlist(y, y_extra, y_b, e, e_extra, a, r, r_extra, f_aux, b, alpha, beta, ppd) 
 }
 
 # Grep for "b" parameters (ranef), can optionally be specified

@@ -1,7 +1,9 @@
+// prior family: 0 = none, 1 = log-normal, 2 = gamma
+int<lower=0,upper=2> frailty_dist;
+
 // prior family: 0 = none, 1 = normal, 2 = student_t, 3 = hs, 4 = hs_plus, 
 //   5 = laplace, 6 = lasso
-int<lower=0,upper=1> e_prior_dist_for_frailty;
-int<lower=0,upper=3> e_prior_dist_for_frscale;
+int<lower=0,upper=3> e_prior_dist_for_lambda;
 int<lower=0,upper=6> r_prior_dist;
 int<lower=0,upper=2> r_prior_dist_for_intercept;
 

@@ -46,7 +46,8 @@
   * @param prior_{mean,scale} Vector of prior means and scales
   * @return A vector
   */  
-  vector generate_aux(vector aux_unscaled, int prior_dist, vector prior_mean, vector prior_scale) {
+  vector generate_aux(vector aux_unscaled, int prior_dist, 
+    vector prior_mean, vector prior_scale) {
     vector[rows(aux_unscaled)] aux;
     if (prior_dist == 0) // none
       aux = aux_unscaled;
@@ -59,21 +60,21 @@
   }
 
   /** 
-  * Generate frailty parameters using unscaled params and prior information
+  * Generate frailty parameters using primitive params and frailty dist information
   *
-  * @param aux_unscaled Vector of unscaled frailty params
-  * @param prior_dist An integer indicating the prior distribution
-  * @param prior_{mean,scale} Prior means and scales
+  * @param z_frailty Vector of primitive frailty params
+  * @param frailty_dist An integer indicating the type of frailty distribution
+  * @param frailty_aux Auxliary parameter for frailty distribution.
+  *   If frailty_dist == 1, frailty_aux is SD of normal distribution.
+  *   If frailty_dist == 2, frailty_aux is alpha and beta for gamma distribution.
   * @return A vector
   */  
-  vector generate_frailty(vector z_frailty, int prior_dist, real prior_mean, real prior_scale) {
+  vector generate_frailty(vector z_frailty, int frailty_dist, real frailty_aux) {
     vector[rows(z_frailty)] frailty;
-    if (prior_dist == 0) // none
+    if (frailty_dist == 1) // log-normal frailty
+      frailty = frailty_aux * z_frailty;
+    else { // gamma frailty
       frailty = z_frailty;
-    else {
-      frailty = prior_scale * z_frailty;
-      if (prior_dist <= 2) // normal or student_t
-        frailty = frailty + prior_mean;
     }
     return frailty;	
   }
@@ -196,6 +197,25 @@
   }  
   
   /** 
+  * Log-prior for coefficient on frailty term in terminating
+  * event submodel
+  *
+  * @param z_lambda Real, the primitive coefficient parameter
+  * @param dist Integer, the type of prior distribution
+  * @param mean Real, mean of prior distribution
+  * @param scale Real, scale for the prior distribution
+  * @param df Real, df for the prior distribution
+  * @return nothing
+  */  
+  void lambda_lp(real z_lambda, int dist, real mean, real scale, real df) {
+    if (dist == 1)  // normal
+      target += normal_lpdf(z_lambda | 0, 1);
+    else if (dist == 2)  // student_t
+      target += student_t_lpdf(z_lambda | df, 0, 1);
+    /* else dist is 0 and nothing is added */
+  }
+  
+  /** 
   * Log-prior for intercept parameters
   *
   * @param gamma Real, the intercept parameter
@@ -212,7 +232,7 @@
       target += student_t_lpdf(gamma | df, mean, scale);
     /* else dist is 0 and nothing is added */
   }
-
+  
   /** 
   * Log-prior for auxiliary parameters
   *
