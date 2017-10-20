@@ -1189,57 +1189,6 @@ check_pp_ids <- function(object, ids, m = 1) {
   if (!all(ids %in% ids2)) TRUE else FALSE
 }
 
-# Validate newdataLong and newdataEvent arguments
-#
-# @param object A stanmvreg object
-# @param newdataLong A data frame, or a list of data frames
-# @param newdataEvent A data frame
-# @param duplicate_ok A logical. If FALSE then only one row per individual is
-#   allowed in the newdataEvent data frame
-# @return A list of validated data frames
-validate_newdatas <- function(object, newdataLong = NULL, newdataEvent = NULL,
-                              duplicate_ok = FALSE) {
-  validate_stanmvreg_object(object)
-  id_var <- object$id_var
-  newdatas <- list()
-  if (!is.null(newdataLong)) {
-    if (!is(newdataLong, "list"))
-      newdataLong <- rep(list(newdataLong), get_M(object))
-    dfcheck <- sapply(newdataLong, is.data.frame)
-    if (!all(dfcheck))
-      stop("'newdataLong' must be a data frame or list of data frames.", call. = FALSE)
-    nacheck <- sapply(seq_along(newdataLong), function(m)
-      all(!is.na(get_all_vars(formula(object, m = m), newdataLong[[m]]))))
-    if (!all(nacheck))
-      stop("'newdataLong' cannot contain NAs.", call. = FALSE)
-    newdatas <- c(newdatas, newdataLong)
-  }
-  if (!is.null(newdataEvent)) {
-    if (!is.data.frame(newdataEvent))
-      stop("'newdataEvent' must be a data frame.", call. = FALSE)
-    dat <- get_all_vars(formula(object, m = "Event"), newdataEvent)
-    dat[[id_var]] <- newdataEvent[[id_var]] # include ID variable in event data
-    if (any(is.na(dat)))
-      stop("'newdataEvent' cannot contain NAs.", call. = FALSE)
-    if (!duplicate_ok && any(duplicated(newdataEvent[[id_var]])))
-      stop("'newdataEvent' should only contain one row per individual, since ",
-           "time varying covariates are not allowed in the prediction data.")
-    newdatas <- c(newdatas, list(Event = newdataEvent))
-  }
-  if (length(newdatas)) {
-    idvar_check <- sapply(newdatas, function(x) id_var %in% colnames(x)) 
-    if (!all(idvar_check)) 
-      STOP_no_var(id_var)
-    ids <- lapply(newdatas, function(x) unique(x[[id_var]]))
-    sorted_ids <- lapply(ids, sort)
-    if (!length(unique(sorted_ids)) == 1L) 
-      stop("The same subject ids should appear in each new data frame.")
-    if (!length(unique(ids)) == 1L) 
-      stop("The subject ids should be ordered the same in each new data frame.")  
-    return(newdatas)
-  } else return(NULL)
-}
-
 # Return data frames only including the specified subset of individuals
 #
 # @param object A stanmvreg object

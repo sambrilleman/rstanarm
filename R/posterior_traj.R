@@ -199,25 +199,21 @@ posterior_traj <- function(object, m = 1, newdata = NULL,
   validate_stanmvreg_object(object)
   if (!is.jm(object)) 
     STOP_jm_only("'posterior_traj'")
+  
   M <- get_M(object)
-  id_var   <- object$id_var
-  time_var <- object$time_var
-  validate_positive_scalar(m, not_greater_than = M)
+  id_var    <- object$id_var
+  time_var  <- object$time_var
   grp_stuff <- object$grp_stuff[[m]]
+  
+  validate_positive_scalar(m, not_greater_than = M)
+  
   if (missing(ids)) 
     ids <- NULL
   
   # Construct prediction data, NB data == observed data to return to user
-  newdata <- validate_newdata(newdata)
-  if (is.null(newdata)) {
-    data <- get_model_data(object)[[m]]
-  } else {
-    data <- newdata  
-  }
-  if (!id_var %in% names(data)) 
-    STOP_no_var(id_var)
-  if (!time_var %in% names(data)) 
-    STOP_no_var(time_var)
+  newdata <- .validate_newdata_jm(object, newdata = newdata)
+  data <- .clean_pp_data_jm(object, newdatas = newdata, m = NULL, 
+                            keep_response = FALSE)
   if (!is.null(ids)) # user specified a subset of ids
     data <- subset_ids(object, data, ids)
   id_list <- unique(data[[id_var]]) # order of ids from data, not ids arg
