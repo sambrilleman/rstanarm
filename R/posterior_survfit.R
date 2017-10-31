@@ -258,6 +258,10 @@ posterior_survfit <- function(object, newdataLong = NULL, newdataEvent = NULL,
   if (missing(ids)) 
     ids <- NULL
   
+  # Check whether posterior_survfit was called from predictive_error
+  fn <- tryCatch(sys.call(-1)[[1L]], error = function(e) NULL)
+  predictive_error_call <- grepl("predictive_error", deparse(fn), fixed = TRUE) 
+  
   # Temporary stop, until make_assoc_terms can handle it
   sel_stop <- grep("^shared", rownames(object$assoc))
   if (any(unlist(object$assoc[sel_stop,])))
@@ -406,45 +410,68 @@ posterior_survfit <- function(object, newdataLong = NULL, newdataEvent = NULL,
       Ni <- tapply(ndL[[1]][[b2_var]], ndL[[1]][[id_var]], 
                    function(x) length(unique(x)))
     }
-    cat("Drawing random effects for", length(id_list), "new individuals.",
-        "Monitoring progress:\n")
-    pb <- utils::txtProgressBar(min = 0, max = length(id_list), style = 3)
-    b_new <- list()
-    for (i in 1:length(id_list)) {
-      len_b <- if (use_b2) b1_p + Ni[id_list[[i]]] * b2_p else b1_p
-      mat <- matrix(NA, nrow(stanmat), len_b)
-      # Design matrices for individual i only
-      dat_i <- .pp_data_jm(object, ndL, ndE, etimes = last_time[[i]], ids = id_list[[i]])
-      if (use_b2)
-        dat_i$Ni <- Ni[id_list[[i]]]
-      # Obtain mode and var-cov matrix of posterior distribution of new b pars
-      # based on asymptotic assumptions, used as center and width of proposal
-      # distribution in MH algorithm
-      inits <- rep(0, len_b)
-      val <- optim(inits, optim_fn, object = object, data = dat_i, 
-                   pars = pars_means, method = "BFGS", hessian = TRUE)
-      delta_i <- val$par                    # asymptotic mode of posterior
-      Sigma_i <- scale * solve(val$hessian) # (scaled) asymptotic vcov of posterior
-      b_current <- delta_i # asympotic mode used as init value for MH algorithm
-      # Run MH algorithm for each individual
-      for (s in 1:nrow(stanmat)) {
-        pars_s <- extract_pars(object, stanmat[s, , drop = FALSE])
-        b_current <- mat[s,] <- 
-          mh_step(b_old = b_current, delta = delta_i, sigma = Sigma_i, 
-                  df = 4, object = object, data = dat_i, pars = pars_s)
-      }
-      new_nms <- unlist(sapply(dat_i$assoc_parts, function(x) x$mod_eta$Z_names))
-      colnames(mat) <- paste0("b[", new_nms, "]")
-      b_new[[i]] <- mat
-      utils::setTxtProgressBar(pb, i)
-    }  
-    close(pb)
+    if (predictive_error_call) { # no MH algorithm, just use point estimates for new REs
+      cat("Drawing random effects for", length(id_list), "new individuals.",
+          "Monitoring progress:\n")
+      pb <- utils::txtProgressBar(min = 0, max = length(id_list), style = 3)
+      b_new <- lapply(1:length(id_list), function(i) {
+        len_b <- if (use_b2) b1_p + Ni[id_list[[i]]] * b2_p else b1_p
+        # Design matrices for individual i only
+        dat_i <- .pp_data_jm(object, ndL, ndE, etimes = last_time[[i]], ids = id_list[[i]])
+        if (use_b2)
+          dat_i$Ni <- Ni[id_list[[i]]]
+        # Obtain mode of posterior distribution of new b pars based on asymptotic assumptions
+        inits <- rep(0, len_b)
+        val <- optim(inits, optim_fn, object = object, data = dat_i, 
+                     pars = pars_means, method = "BFGS", hessian = TRUE)$par
+        mat <- matrix(rep(val, nrow(stanmat)), nrow(stanmat), len_b, byrow = TRUE)
+        new_nms <- unlist(sapply(dat_i$assoc_parts, function(x) x$mod_eta$Z_names))
+        colnames(mat) <- paste0("b[", new_nms, "]")
+        utils::setTxtProgressBar(pb, i)
+        mat
+      })  
+      close(pb)
+    } else { # draw new REs using MH algorithm
+      cat("Drawing random effects for", length(id_list), "new individuals.",
+          "Monitoring progress:\n")
+      pb <- utils::txtProgressBar(min = 0, max = length(id_list), style = 3)
+      b_new <- list()
+      for (i in 1:length(id_list)) {
+        len_b <- if (use_b2) b1_p + Ni[id_list[[i]]] * b2_p else b1_p
+        mat <- matrix(NA, nrow(stanmat), len_b)
+        # Design matrices for individual i only
+        dat_i <- .pp_data_jm(object, ndL, ndE, etimes = last_time[[i]], ids = id_list[[i]])
+        if (use_b2)
+          dat_i$Ni <- Ni[id_list[[i]]]
+        # Obtain mode and var-cov matrix of posterior distribution of new b pars
+        # based on asymptotic assumptions, used as center and width of proposal
+        # distribution in MH algorithm
+        inits <- rep(0, len_b)
+        val <- optim(inits, optim_fn, object = object, data = dat_i, 
+                     pars = pars_means, method = "BFGS", hessian = TRUE)
+        delta_i <- val$par                    # asymptotic mode of posterior
+        Sigma_i <- scale * solve(val$hessian) # (scaled) asymptotic vcov of posterior
+        b_current <- delta_i # asympotic mode used as init value for MH algorithm
+        # Run MH algorithm for each individual
+        for (s in 1:nrow(stanmat)) {
+          pars_s <- extract_pars(object, stanmat[s, , drop = FALSE])
+          b_current <- mat[s,] <- 
+            mh_step(b_old = b_current, delta = delta_i, sigma = Sigma_i, 
+                    df = 4, object = object, data = dat_i, pars = pars_s)
+        }
+        new_nms <- unlist(sapply(dat_i$assoc_parts, function(x) x$mod_eta$Z_names))
+        colnames(mat) <- paste0("b[", new_nms, "]")
+        b_new[[i]] <- mat
+        utils::setTxtProgressBar(pb, i)
+      }  
+      close(pb)
+    }
     b_new <- do.call("cbind", b_new)      # cbind new b pars for all individuals
     b_sel <- b_names(colnames(stanmat))   
     stanmat <- stanmat[, -b_sel, drop = FALSE] # drop old b pars from stanmat
     stanmat <- cbind(stanmat, b_new)           # add new b pars to stanmat
     pars <- extract_pars(object, stanmat) # reextract pars list with new b pars
-  }
+  }      
 
   # Matrix of surv probs at each increment of the extrapolation sequence
   # NB If no extrapolation then length(time_seq) == 1L
@@ -504,11 +531,8 @@ posterior_survfit <- function(object, newdataLong = NULL, newdataEvent = NULL,
   
   # temporary hack so that predictive_error can call posterior_survfit
   # with two separate conditioning times...
-  fn <- tryCatch(sys.call(-1)[[1]], error = function(e) NULL)
   dots <- list(...)
-  if (!is.null(fn) && 
-      grepl("predictive_error", deparse(fn), fixed = TRUE) &&
-      "last_time2" %in% names(dots)) {
+  if (predictive_error_call && "last_time2" %in% names(dots)) {
     last_time2 <- ndE[[dots$last_time2]]
     cond_dat2 <- .pp_data_jm(object, newdataLong = ndL, newdataEvent = ndE, 
                          ids = id_list, etimes = last_time2, long_parts = FALSE)

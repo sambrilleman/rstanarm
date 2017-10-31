@@ -124,18 +124,18 @@ predictive_error.ppd <- function(object, y, ...) {
   rstantools::predictive_error(ytilde, y = y)
 }
 
-# @rdname predictive_error.stanreg
-# @export
-# @param m For \code{stanmvreg} models, the submodel for which to calculate
-#   the prediction error. Can be an integer, or for \code{\link{stan_mvmer}}
-#   models it can be \code{"y1"}, \code{"y2"}, etc, or for \code{\link{stan_jm}}
-#   models it can be \code{"Event"}, \code{"Long1"}, \code{"Long2"}, etc.
-# @param t,u Only relevant for \code{\link{stan_jm}} models and when \code{m = "Event"}. 
-#   The argument \code{t} specifies the time up to which individuals must have survived
-#   as well as being the time up to which the longitudinal data in \code{newdata}
-#   is available. The argument \code{u} specifies the time at which the 
-#   prediction error should be calculated (i.e. the time horizon).
-#   
+#' @rdname predictive_error.stanreg
+#' @export
+#' @param m For \code{stanmvreg} models, the submodel for which to calculate
+#'   the prediction error. Can be an integer, or for \code{\link{stan_mvmer}}
+#'   models it can be \code{"y1"}, \code{"y2"}, etc, or for \code{\link{stan_jm}}
+#'   models it can be \code{"Event"}, \code{"Long1"}, \code{"Long2"}, etc.
+#' @param t,u Only relevant for \code{\link{stan_jm}} models and when \code{m = "Event"}. 
+#'   The argument \code{t} specifies the time up to which individuals must have survived
+#'   as well as being the time up to which the longitudinal data in \code{newdata}
+#'   is available. The argument \code{u} specifies the time at which the 
+#'   prediction error should be calculated (i.e. the time horizon).
+#'   
 predictive_error.stanmvreg <-
   function(object,
            newdataLong = NULL,
@@ -146,9 +146,8 @@ predictive_error.stanmvreg <-
            seed = NULL,
            offset = NULL,
            t, u,
-           lossfn = "square",
+           loss_function = "square",
            ...) {
-    stop("This function is not yet implemented for stanmvreg objects.")
     if ("y" %in% names(list(...)))
       stop("Argument 'y' should not be specified if 'object' is a stanmvreg object.")
     if (!is.jm(object))
@@ -191,7 +190,7 @@ predictive_error.stanmvreg <-
       sel <- which(ndE[[event_tvar]] > t)
       ndE <- ndE[sel, , drop = FALSE]
       ndL <- lapply(ndL, function(x) {
-        sel <- which(x[[object$time_var]] > t)
+        sel <- which(x[[object$time_var]] <= t)
         x[sel, , drop = FALSE]
       })      
       id_var <- object$id_var
@@ -226,7 +225,7 @@ predictive_error.stanmvreg <-
 
       y <- merge(y, ytilde, by = id_var)
 
-      loss <- switch(lossfn,
+      loss <- switch(loss_function,
                      square = function(x) {x*x},
                      absolute = function(x) {abs(x)})
       
@@ -237,10 +236,15 @@ predictive_error.stanmvreg <-
         y$status * (1 - y$dummy) * loss(0 - y$survpred) +
         (1 - y$status) * (1 - y$dummy) * (
           y$survpred_eventtime * loss(1- y$survpred) + 
-            (1 - y$survpred_eventtime) + loss(0- y$survpred)
+            (1 - y$survpred_eventtime) * loss(0- y$survpred)
         )
-      return(list(PE = mean(y$res), N = nrow(y)))
-      
+      ret <- structure(mean(y$res), 
+                       n_subjects_at_risk = nrow(y),
+                       t = t, u = u, 
+                       loss_function = loss_function,
+                       stanreg_name = deparse(substitute(object)),
+                       class = "predictive_error.survfit.stanjm")
+      return(ret)
     } else { # prediction error for longitudinal submodel
       
       y <- if (is.null(newdataLong))
@@ -264,3 +268,31 @@ predictive_error.stanmvreg <-
       return(predictive_error.ppd(ytilde, y = y))
     }
   }
+
+
+# ------------------ exported but doc kept internal
+
+#' Generic print method for \code{predictive_error.survfit.stanjm} objects
+#' 
+#' @rdname print.predictive_error.survfit.stanjm
+#' @method print predictive_error.survfit.stanjm
+#' @keywords internal
+#' @export
+#' @param x An object of class \code{predictive_error.survfit.stanjm}, returned by a call to 
+#'   \code{\link{predictive_error}} (with argument \code{m = "Event"}).
+#' @param digits Number of digits to use for formatting the prediction error.
+#' @param ... Ignored.
+#' 
+print.predictive_error.survfit.stanjm <- function(x, digits = 4, ...) {
+  pe <- format(round(x, digits), nsmall = digits)
+  msg <- paste0("Event prediction error for model '", attr(x, "stanreg_name"), "'")
+  cat(msg)
+  cat("\n------")  
+  cat("\nEstimated prediction error:            ", pe)
+  cat("\nPrediction is calculated at time (t):  ", attr(x, "u"))
+  cat("\nUsing longitudinal data up to time (u):", attr(x, "t"))
+  cat("\nNum. subjects still at risk at time t: ", attr(x, "n_subjects_at_risk"))
+  cat("\nLoss function used:                    ", attr(x, "loss_function"))
+  cat("\n------")
+  invisible(x)
+}
