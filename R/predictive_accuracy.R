@@ -137,16 +137,17 @@ predictive_accuracy.stanjm <- function(object, newdataLong = NULL, newdataEvent 
     names(last_time_4i) <- ndE_4i[[id_var]]
     names(last_time_4j) <- ndE_4j[[id_var]]
     survpred_4i <- posterior_survfit(object, newdataLong = ndL_4i, newdataEvent = ndE_4i, 
-                                     times = u, last_time = ndE_4i[[event_tvar]], 
+                                     times = u, last_time = last_time_4i, 
                                      draws = draws, seed = seed)
     survpred_4j <- posterior_survfit(object, newdataLong = ndL_4j, newdataEvent = ndE_4j, 
-                                     times = u, last_time = ndE_4j[[event_tvar]], 
+                                     times = u, last_time = last_time_4j, 
                                      draws = draws, seed = seed)
     ind[ind4] <- ind[ind4] * (1 - survpred_4i[nams_i, "survpred"]) * (survpred_4j[nams_j, "survpred"])
   }
   
   auc <- sum((survpred_i < survpred_j) * c(ind), na.rm = TRUE) / sum(ind, na.rm = TRUE) 
-  auc
+  nlist(auc, ind, ind1, ind2, ind3, ind4, 
+        survpred_i, survpred_j, survpred, survpred_2i, survpred_3j, survpred_4i, survpred_4j)
 }
   
 
