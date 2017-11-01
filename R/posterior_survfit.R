@@ -260,7 +260,7 @@ posterior_survfit <- function(object, newdataLong = NULL, newdataEvent = NULL,
   
   # Check whether posterior_survfit was called from predictive_error
   fn <- tryCatch(sys.call(-1)[[1L]], error = function(e) NULL)
-  predictive_error_call <- grepl("predictive_error", deparse(fn), fixed = TRUE) 
+  nodraw <- grepl("predictive_error|predictive_accuracy", deparse(fn)) 
   
   # Temporary stop, until make_assoc_terms can handle it
   sel_stop <- grep("^shared", rownames(object$assoc))
@@ -410,7 +410,7 @@ posterior_survfit <- function(object, newdataLong = NULL, newdataEvent = NULL,
       Ni <- tapply(ndL[[1]][[b2_var]], ndL[[1]][[id_var]], 
                    function(x) length(unique(x)))
     }
-    if (predictive_error_call) { # no MH algorithm, just use point estimates for new REs
+    if (nodraw) { # no MH algorithm, just use point estimates for new REs
       cat("Drawing random effects for", length(id_list), "new individuals.",
           "Monitoring progress:\n")
       pb <- utils::txtProgressBar(min = 0, max = length(id_list), style = 3)
@@ -532,7 +532,7 @@ posterior_survfit <- function(object, newdataLong = NULL, newdataEvent = NULL,
   # temporary hack so that predictive_error can call posterior_survfit
   # with two separate conditioning times...
   dots <- list(...)
-  if (predictive_error_call && "last_time2" %in% names(dots)) {
+  if (nodraw && "last_time2" %in% names(dots)) {
     last_time2 <- ndE[[dots$last_time2]]
     cond_dat2 <- .pp_data_jm(object, newdataLong = ndL, newdataEvent = ndE, 
                          ids = id_list, etimes = last_time2, long_parts = FALSE)

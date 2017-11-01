@@ -164,7 +164,7 @@ predictive_error.stanmvreg <-
         stop("No event submodel was found in the fitted object.")
       if (is.null(t) || is.null(u))
         stop("'t' and 'u' must be specified when calculating the ",
-             "prediction error for the event submodel.")
+             "predictive error for the event submodel.")
       if (u <= t)
         stop("'u' must be greater than 't'.")
       
@@ -182,31 +182,21 @@ predictive_error.stanmvreg <-
         ndL <- newdatas[1:M]
         ndE <- newdatas[["Event"]]   
       }
-      
-      # Subset prediction data to only include
-      # observations prior to time t
+
+      # Obtain event time and status variable, from event submodel formula
       fm_LHS <- formula(object, m = "Event")[[2L]]
-      event_tvar <- as.character(fm_LHS[[length(fm_LHS) - 1L]])
-      sel <- which(ndE[[event_tvar]] > t)
-      ndE <- ndE[sel, , drop = FALSE]
-      ndL <- lapply(ndL, function(x) {
-        sel <- which(x[[object$time_var]] <= t)
-        x[sel, , drop = FALSE]
-      })      
+      len <- length(fm_LHS)
+      event_tvar <- as.character(fm_LHS[[len - 1L]])
+      event_dvar <- as.character(fm_LHS[[len]])
       id_var <- object$id_var
-      ids <- ndE[[id_var]]
-      for (i in 1:length(ndL))
-        ids <- intersect(ndL[[i]][[id_var]], ids)
-      if (!length(ids))
-        stop("No individuals still at risk at time 't' and ",
-             "with longitudinal measurements prior to 't'.")
-      ndE <- ndE[ndE[[id_var]] %in% ids, , drop = FALSE]
-      ndL <- lapply(ndL, function(x) {
-        x[x[[id_var]] %in% ids, , drop = FALSE]
-      })
+      
+      # Subset prediction data to only include individuals surviving up
+      # to time t and their longitudinal data observed prior to time t
+      subdats <- get_conditional_prediction_data(object, ndL, ndE, t = t)
+      ndL <- subdats[1:M]
+      ndE <- subdats[["Event"]]
       
       # Observed y: event status at time u
-      event_dvar <- as.character(fm_LHS[[length(fm_LHS)]])
       y <- ndE[, c(id_var, event_tvar, event_dvar), drop = FALSE]
 
       # Predicted y: conditional survival probability at time u
