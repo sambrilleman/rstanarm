@@ -1,26 +1,119 @@
+# Part of the rstanarm package for estimating model parameters
+# Copyright (C) 2017 Sam Brilleman
+# 
+# This program is free software; you can redistribute it and/or
+# modify it under the terms of the GNU General Public License
+# as published by the Free Software Foundation; either version 3
+# of the License, or (at your option) any later version.
+# 
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+# 
+# You should have received a copy of the GNU General Public License
+# along with this program; if not, write to the Free Software
+# Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 
+#' Predictive error and accuracy measures for an event outcome
+#' 
+#' Calculate predictive error and accuracy measures (discrimination, calibration)
+#' for the event outcome (i.e. the event submodel) based on a fitted joint model 
+#' for longitudinal and time-to-event data estimated using \code{\link{stan_jm}}.
+#' 
 #' @export
+#' @templateVar stanjmArg object
+#' @template args-stanjm-object
+#' @param ... Ignored for the \code{stanjm} method.
+#' 
+#' @details
+#' The predictive error or accuracy measure is calculated only using individuals
+#' who are still at risk of the event at time \code{t} (i.e. they have not 
+#' experienced the event, or been censored, prior to time {t}). If there are 
+#' individuals in the data who have experienced the event, or been censored, 
+#' prior to time {t}, then these individuals are discarded before calculating the 
+#' predictive error or accuracy measure. Moreover, only longitudinal data
+#' observed between time 0 (i.e. baseline) and time \code{t} is used in the
+#' calculation. That is, any longitudinal data observed after time {t} is also
+#' discarded before calculating the predictive error or accuracy measure.
+#' 
+#' The \code{predictive_accuracy} function can be used to calculate the 
+#' following types of measures:
+#' 
+#' \subsection{Time-dependent AUC measure (\code{type = "auc"})}{
+#' To be completed. Describe the time-dependent area under the receiver 
+#' operating characteristic curve (AUC) measure.
+#' }
+#' \subsection{Prediction error (\code{type = "error"})}{
+#' To be completed. Describe the prediction error calculation for event submodel.
+#' }
+#' 
+#' @seealso \code{\link{posterior_survfit}} 
+#' 
+#' @examples
+#' \donttest{
+#'   # Run example model if not already loaded
+#'   if (!exists("example_jm")) example(example_jm)
+#'   
+#'   # Time-dependent AUC
+#'   predictive_accuracy(example_jm, t = 5, u = 8)
+#'   
+#'   # Prediction error
+#'   predictive_accuracy(example_jm, t = 5, u = 8, type = "error")
+#' }
+#' 
 predictive_accuracy <- function(object, ...) {
   UseMethod("predictive_accuracy")
 }
 
+#' @rdname predictive_accuracy
 #' @export
-#' 
+#' @param newdataLong,newdataEvent Optionally, a data frame (or in the case of 
+#'   \code{newdataLong} this can be a list of data frames) in which to look 
+#'   for variables with which to predict. If omitted, the model matrices are used. 
+#'   If new data is provided, then it should also contain the longitudinal 
+#'   outcome data on which to condition when drawing the new group-specific 
+#'   coefficients for individuals in the new data. Note that there is only
+#'   allowed to be one row of data for each individual in \code{newdataEvent}, 
+#'   that is, time-varying covariates are not allowed in the prediction data for
+#'   the event submodel.
+#' @param t,u The argument \code{t} specifies the time up to which individuals must 
+#'   have survived as well as being the time up to which the longitudinal data 
+#'   in \code{newdata} is available. The argument \code{u} specifies the time 
+#'   horizon up to which the prediction error or accuracy measure should be calculated.
+#' @param type The type of predictive error or accuracy measure to calculate. 
+#'   Can currently be any of the following:
+#'   \describe{
+#'     \item{\code{"auc"}}{a time-dependent AUC measure evaluating the 
+#'     discriminatory ability of the model between times \code{t} and
+#'     \code{u}.}
+#'     \item{\code{"error"}}{the prediction error for the event outcome evaluated
+#'     between times \code{t} and \code{u} and allowing for censoring.}
+#'   }
+#' @param loss_function The loss function to use when \code{type = "error"}.
+#'   Can be \code{"square"} (the default), \code{"absolute"}, or a user-defined
+#'   function.
+#' @param draws Currently ignored.
+#' @param seed An optional \code{\link[=set.seed]{seed}} to use.
+#'
 predictive_accuracy.stanjm <- function(object, newdataLong = NULL, newdataEvent = NULL,
-                                       t, delta_t, type = "auc", draws = NULL, seed = NULL) {
+                                       t, u, type = c("auc", "error"), 
+                                       loss_function = "square",
+                                       draws = NULL, seed = NULL, ...) {
+  
   validate_stanjm_object(object)
   if (missing(t)) 
     t <- NULL
-  if (missing(delta_t))
-    delta_t <- NULL
+  if (missing(u))
+    u <- NULL
   M <- get_M(object)
+  type <- match.arg(type)
   
-  if (is.null(t) || is.null(delta_t))
-    stop("'t' and 'delta_t' must be specified when calculating the ",
-         "predictive accuracy for the event submodel.")
-  if (delta_t <= 0)
-    stop("'delta_t' must be positive.")
-  u <- t + delta_t
+  if (is.null(t) || is.null(u))
+    stop("'t' and 'u' must be specified when calculating the ",
+         "predictive error for the event submodel.")
+  if (u <= t)
+    stop("'u' must be greater than 't'.")
   
   # Construct prediction data
   # ndL: dataLong to be used in predictions
@@ -53,104 +146,167 @@ predictive_accuracy.stanjm <- function(object, newdataLong = NULL, newdataEvent 
   # Observed y: event status at time u
   y <- ndE[, c(id_var, event_tvar, event_dvar), drop = FALSE]
   
-  # Predicted y: conditional survival probability at time u
-  ytilde <- posterior_survfit(
-    object, 
-    newdataLong = ndL, 
-    newdataEvent = ndE,
-    times = u,
-    last_time = t,
-    condition = TRUE,
-    extrapolate = FALSE,
-    draws = draws,
-    seed = seed)
-  ytilde <- ytilde[, c(id_var, "survpred"), drop = FALSE]
-  
-  y <- merge(y, ytilde, by = id_var)
-  
-  ids <- y[[id_var]]
-  if (any(duplicated(ids)))
-    stop2("Bug found: y should only contain one row per individual.")
-  eventtime <- y[[event_tvar]]
-  status    <- y[[event_dvar]]
-  survpred  <- y[["survpred"]]
-  names(ids) <- names(eventtime) <- names(status) <- names(survpred) <- ids
-  
-  pairs <- combn(as.character(ids), 2)
-  ids_i <- pairs[1L,]
-  ids_j <- pairs[2L,]
-  times_i    <- eventtime[ids_i]
-  times_j    <- eventtime[ids_j]
-  status_i   <- status[ids_i]
-  status_j   <- status[ids_j]
-  survpred_i <- survpred[ids_i]
-  survpred_j <- survpred[ids_j]
-  
-  ind1 <- (times_i <= u & status_i == 1) & (times_j > u)
-  ind2 <- (times_i <= u & status_i == 0) & (times_j > u)
-  ind3 <- (times_i <= u & status_i == 1) & (times_j <= u & status_j == 0)
-  ind4 <- (times_i <= u & status_i == 0) & (times_j <= u & status_j == 0)
-  names(ind1) <- names(ind2) <- names(ind3) <- names(ind4) <- 
-    paste(ids_i, ids_j, sep = "_")
-  ind <- ind1 | ind2 | ind3 | ind4
-  
-  if (any(ind2)) {
-    nams <- strsplit(names(ind2[ind2]), "_")
-    nams_i <- sapply(nams, `[`, 1L)
-    unq_nams_i <- unique(nams_i)
-    ndE_2i <- ndE[ndE[[id_var]] %in% unq_nams_i, , drop = FALSE]
-    ndL_2i <- lapply(ndL, function(x) x[x[[id_var]] %in% unq_nams_i, , drop = FALSE])
-    last_time_2i <- ndE_2i[[event_tvar]]
-    names(last_time_2i) <- ndE_2i[[id_var]]
-    survpred_2i <- posterior_survfit(object, newdataLong = ndL_2i, newdataEvent = ndE_2i, 
-                                     times = u, last_time = last_time_2i, 
-                                     draws = draws, seed = seed)
-    ind[ind2] <- ind[ind2] * (1 - survpred_2i[nams_i, "survpred"])
+  if (type == "auc") {
+    
+    # Predicted y: conditional survival probability at time u
+    ytilde <- posterior_survfit(
+      object, 
+      newdataLong = ndL, 
+      newdataEvent = ndE,
+      times = u,
+      last_time = t,
+      condition = TRUE,
+      extrapolate = FALSE,
+      draws = draws,
+      seed = seed)
+    ytilde <- ytilde[, c(id_var, "survpred"), drop = FALSE]
+
+    # Merge observed event status and predicted surv prob
+    y <- merge(y, ytilde, by = id_var)
+    
+    # Extract necessary components as named vectors
+    ids <- y[[id_var]]
+    if (any(duplicated(ids)))
+      stop2("Bug found: y should only contain one row per individual.")
+    eventtime <- y[[event_tvar]]
+    status    <- y[[event_dvar]]
+    survpred  <- y[["survpred"]]
+    names(ids) <- names(eventtime) <- names(status) <- names(survpred) <- ids
+    
+    # Ensure eventtime_i <= eventtime_j (for subjects i and j)
+    ord <- order(eventtime)
+    ids       <- ids[ord]
+    eventtime <- eventtime[ord]
+    status    <- status[ord]
+    survpred  <- survpred[ord]
+    
+    # Extract necessary components for each pair of subject (i,j)
+    pairs <- combn(as.character(ids), 2)
+    ids_i <- pairs[1L,]
+    ids_j <- pairs[2L,]
+    times_i    <- eventtime[ids_i]
+    times_j    <- eventtime[ids_j]
+    status_i   <- status[ids_i]
+    status_j   <- status[ids_j]
+    survpred_i <- survpred[ids_i]
+    survpred_j <- survpred[ids_j]
+    
+    # Calculate AUC
+    ind1 <- (times_i <= u & status_i == 1) & (times_j > u)
+    ind2 <- (times_i <= u & status_i == 0) & (times_j > u)
+    ind3 <- (times_i <= u & status_i == 1) & (times_j <= u & status_j == 0)
+    ind4 <- (times_i <= u & status_i == 0) & (times_j <= u & status_j == 0)
+    nms_ind <- paste(ids_i, "_", ids_j)
+    names(ind1) <- names(ind2) <- names(ind3) <- names(ind4) <- nms_ind
+    ind <- ind1 | ind2 | ind3 | ind4
+    
+    if (any(ind2)) {
+      nms <- strsplit(names(ind2[ind2]), "_")
+      nms_i <- sapply(nms, `[`, 1L)
+      ind[ind2] <- ind[ind2] * (1 - survpred[nms_i])
+    }
+    
+    if (any(ind3)) {
+      nms <- strsplit(names(ind3[ind3]), "_")
+      nms_j <- sapply(nms, "[", 2)
+      ind[ind3] <- ind[ind3] * survpred[nms_j]
+    }
+    
+    if (any(ind4)) {
+      nms <- strsplit(names(ind4[ind4]), "_")
+      nms_i <- sapply(nms, "[", 1)
+      nms_j <- sapply(nms, "[", 2)
+      ind[ind4] <- ind[ind4] * (1 - survpred[nms_i]) * (survpred[nms_j])
+    }
+    
+    val <- sum((survpred_i < survpred_j) * c(ind), na.rm = TRUE) / sum(ind, na.rm = TRUE) 
+    
+  } else if (type == "error") {
+    
+    # Predicted y: conditional survival probability at time u
+    ytilde <- posterior_survfit(
+      object, 
+      newdataLong = ndL, 
+      newdataEvent = ndE,
+      times = u,
+      last_time = t,
+      last_time2 = event_tvar,
+      condition = TRUE,
+      extrapolate = FALSE,
+      draws = draws,
+      seed = seed)
+    ytilde <- ytilde[, c(id_var, "survpred", "survpred_eventtime"), drop = FALSE]
+    
+    # Merge observed event status and predicted surv prob
+    y <- merge(y, ytilde, by = id_var)
+    
+    loss <- switch(loss_function,
+                   square = function(x) {x*x},
+                   absolute = function(x) {abs(x)})
+    
+    # Calculate mean prediction error
+    y$status <- as.integer(y[[event_dvar]])
+    y$ind    <- as.integer(y[[event_tvar]] > u)
+    y$ind1 <- y$ind                        # died/censored after u
+    y$ind2 <- y$status * (1 - y$ind)       # died before u
+    y$ind3 <- (1 - y$status) * (1 - y$ind) # censored before u
+    y$val <- 
+      y$ind1 * loss(1 - y$survpred) +
+      y$ind2 * loss(0 - y$survpred) +
+      y$ind3 * (y$survpred_eventtime * loss(1- y$survpred) + 
+                  (1 - y$survpred_eventtime) * loss(0- y$survpred))
+    val <- mean(y$val)
   }
   
-  if (any(ind3)) {
-    nams <- strsplit(names(ind3[ind3]), "_")
-    nams_j <- sapply(nams, "[", 2)
-    unq_nams_j <- unique(nams_j)
-    ndE_3j <- ndE[ndE[[id_var]] %in% unq_nams_j, , drop = FALSE]
-    ndL_3j <- lapply(ndL, function(x) x[x[[id_var]] %in% unq_nams_j, , drop = FALSE])
-    last_time_3j <- ndE_3j[[event_tvar]]
-    names(last_time_3j) <- ndE_3j[[id_var]]
-    survpred_3j <- posterior_survfit(object, newdataLong = ndL_3j, newdataEvent = ndE_3j, 
-                                     times = u, last_time = last_time_3j,
-                                     draws = draws, seed = seed)
-    ind[ind3] <- ind[ind3] * survpred_3j[nams_j, "survpred"]
-  }
-  
-  if (any(ind4)) {
-    nams <- strsplit(names(ind4[ind4]), "_")
-    nams_i <- sapply(nams, "[", 1)
-    nams_j <- sapply(nams, "[", 2)
-    unq_nams_i <- unique(nams_i)
-    unq_nams_j <- unique(nams_j)
-    ndE_4i <- ndE[ndE[[id_var]] %in% unq_nams_i, , drop = FALSE]
-    ndE_4j <- ndE[ndE[[id_var]] %in% unq_nams_j, , drop = FALSE]
-    ndL_4i <- lapply(ndL, function(x) x[x[[id_var]] %in% unq_nams_i, , drop = FALSE])
-    ndL_4j <- lapply(ndL, function(x) x[x[[id_var]] %in% unq_nams_j, , drop = FALSE])
-    last_time_4i <- ndE_4i[[event_tvar]]
-    last_time_4j <- ndE_4j[[event_tvar]]
-    names(last_time_4i) <- ndE_4i[[id_var]]
-    names(last_time_4j) <- ndE_4j[[id_var]]
-    survpred_4i <- posterior_survfit(object, newdataLong = ndL_4i, newdataEvent = ndE_4i, 
-                                     times = u, last_time = last_time_4i, 
-                                     draws = draws, seed = seed)
-    survpred_4j <- posterior_survfit(object, newdataLong = ndL_4j, newdataEvent = ndE_4j, 
-                                     times = u, last_time = last_time_4j, 
-                                     draws = draws, seed = seed)
-    ind[ind4] <- ind[ind4] * (1 - survpred_4i[nams_i, "survpred"]) * (survpred_4j[nams_j, "survpred"])
-  }
-  
-  auc <- sum((survpred_i < survpred_j) * c(ind), na.rm = TRUE) / sum(ind, na.rm = TRUE) 
-  nlist(auc, ind, ind1, ind2, ind3, ind4, 
-        survpred_i, survpred_j, survpred, survpred_2i, survpred_3j, survpred_4i, survpred_4j)
+  ret <- structure(val, 
+                   n_subjects_at_risk = nrow(y),
+                   t = t, u = u, type = type,
+                   loss_function = if (type == "error") loss_function,
+                   stanreg_name = deparse(substitute(object)),
+                   class = "predictive_accuracy.stanjm")
+  return(ret)
 }
   
 
+# ------------------ exported but doc kept internal
+
+#' Generic print method for \code{predictive_accuracy.stanjm} objects
+#' 
+#' @rdname print.predictive_accuracy.stanjm
+#' @method print predictive_accuracy.stanjm
+#' @keywords internal
+#' @export
+#' @param x An object of class \code{predictive_accuracy.stanjm}, returned by a call to 
+#'   \code{\link[predictive_accuracy.stanjm]{predictive_accuracy}}.
+#' @param digits Number of digits to use for formatting.
+#' @param ... Ignored.
+#' 
+print.predictive_accuracy.stanjm <- function(x, digits = 4, ...) {
+  val <- format(round(x, digits), nsmall = digits)
+  type <- attr(x, "type")
+  stanreg_nm <- attr(x, "stanreg_name")
+  if (type == "auc") {
+    msg1 <- paste0("Event prediction accuracy (discrimination) for model '", stanreg_nm, "'")
+    msg2 <- paste0("\nEstimated time-dependent AUC:           ", val)
+  } else if (type == "error") {
+    msg1 <- paste0("Event prediction error for model '", stanreg_nm, "'")
+    msg2 <- paste0("\nEstimated prediction error:             ", val)
+  } else {
+    stop2("Bug found: unknown type of predictive_accuracy measure.")
+  }
+  cat(msg1)
+  cat("\n------")  
+  cat(msg2)
+  cat("\nPrediction is calculated at time (t):  ", attr(x, "u"))
+  cat("\nUsing longitudinal data up to time (u):", attr(x, "t"))
+  cat("\nNum. subjects still at risk at time t: ", attr(x, "n_subjects_at_risk"))
+  if (type == "error")
+    cat("\nLoss function used:                    ", attr(x, "loss_function"))
+  cat("\n------")
+  invisible(x)
+}
+
+# ------------------ internal
 
 # Subset the prediction data to only include:
 # - patients who survived up to a specified time t

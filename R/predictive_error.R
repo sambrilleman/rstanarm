@@ -129,160 +129,48 @@ predictive_error.ppd <- function(object, y, ...) {
 #' @param m For \code{stanmvreg} models, the submodel for which to calculate
 #'   the prediction error. Can be an integer, or for \code{\link{stan_mvmer}}
 #'   models it can be \code{"y1"}, \code{"y2"}, etc, or for \code{\link{stan_jm}}
-#'   models it can be \code{"Event"}, \code{"Long1"}, \code{"Long2"}, etc.
-#' @param t,u Only relevant for \code{\link{stan_jm}} models and when \code{m = "Event"}. 
-#'   The argument \code{t} specifies the time up to which individuals must have survived
-#'   as well as being the time up to which the longitudinal data in \code{newdata}
-#'   is available. The argument \code{u} specifies the time at which the 
-#'   prediction error should be calculated (i.e. the time horizon).
+#'   models it can be \code{"Long1"}, \code{"Long2"}, etc. Note that for 
+#'   \code{\link{stan_jm}} models, prediction errors for the event submodel 
+#'   cannot be calculated using this function; instead you should use 
+#'   \code{\link[predictive_accuracy.stanjm]{predictive_accuracy}} which provides a
+#'   variety of prediction error and accuracy measures for the event outcome.
 #'   
 predictive_error.stanmvreg <-
   function(object,
-           newdataLong = NULL,
-           newdataEvent = NULL,
-           m = "Event",
+           newdata = NULL,
+           m = 1,
            draws = NULL,
            re.form = NULL,
            seed = NULL,
-           offset = NULL,
-           t, u,
-           loss_function = "square",
            ...) {
     if ("y" %in% names(list(...)))
       stop("Argument 'y' should not be specified if 'object' is a stanmvreg object.")
     if (!is.jm(object))
       stop("This function is currently only implemented for stan_jm models.")
-    if (missing(t)) 
-      t <- NULL
-    if (missing(u))
-      u <- NULL
+    if (m == "Event")
+      stop("See the 'predictive_accuracy' function for calculating errors ",
+           "and accuracy statistics for the event submodel.")
     M <- get_M(object)
+    if (is.numeric(m) && m > M)
+      stop("'m' should not be greater than ", M, ".")
+
+    y <- if (is.null(newdata))
+      get_y(object, m = m) else eval(formula(object, m = m)[[2L]], newdata)
     
-    if (m == "Event") { # prediction error for event submodel
-            
-      if (!is.surv(object))
-        stop("No event submodel was found in the fitted object.")
-      if (is.null(t) || is.null(u))
-        stop("'t' and 'u' must be specified when calculating the ",
-             "predictive error for the event submodel.")
-      if (u <= t)
-        stop("'u' must be greater than 't'.")
-      
-      # Construct prediction data
-      # ndL: dataLong to be used in predictions
-      # ndE: dataEvent to be used in predictions
-      if (!identical(is.null(newdataLong), is.null(newdataEvent)))
-        stop("Both newdataLong and newdataEvent must be supplied together.")
-      if (is.null(newdataLong)) { # user did not specify newdata
-        dats <- get_model_data(object)
-        ndL <- dats[1:M]
-        ndE <- dats[["Event"]]
-      } else { # user specified newdata
-        newdatas <- validate_newdatas(object, newdataLong, newdataEvent)
-        ndL <- newdatas[1:M]
-        ndE <- newdatas[["Event"]]   
-      }
-
-      # Obtain event time and status variable, from event submodel formula
-      fm_LHS <- formula(object, m = "Event")[[2L]]
-      len <- length(fm_LHS)
-      event_tvar <- as.character(fm_LHS[[len - 1L]])
-      event_dvar <- as.character(fm_LHS[[len]])
-      id_var <- object$id_var
-      
-      # Subset prediction data to only include individuals surviving up
-      # to time t and their longitudinal data observed prior to time t
-      subdats <- get_conditional_prediction_data(object, ndL, ndE, t = t)
-      ndL <- subdats[1:M]
-      ndE <- subdats[["Event"]]
-      
-      # Observed y: event status at time u
-      y <- ndE[, c(id_var, event_tvar, event_dvar), drop = FALSE]
-
-      # Predicted y: conditional survival probability at time u
-      ytilde <- posterior_survfit(
-        object, 
-        newdataLong = ndL, 
-        newdataEvent = ndE,
-        times = u,
-        last_time = t,
-        last_time2 = event_tvar,
-        condition = TRUE,
-        extrapolate = FALSE,
-        draws = draws,
-        seed = seed)
-      ytilde <- ytilde[, c(id_var, "survpred", "survpred_eventtime"), drop = FALSE]
-
-      y <- merge(y, ytilde, by = id_var)
-
-      loss <- switch(loss_function,
-                     square = function(x) {x*x},
-                     absolute = function(x) {abs(x)})
-      
-      y$dummy <- as.integer(y[[event_tvar]] > u)
-      y$status <- as.integer(y[[event_dvar]])
-      y$res <- 
-        y$dummy * loss(1 - y$survpred) +
-        y$status * (1 - y$dummy) * loss(0 - y$survpred) +
-        (1 - y$status) * (1 - y$dummy) * (
-          y$survpred_eventtime * loss(1- y$survpred) + 
-            (1 - y$survpred_eventtime) * loss(0- y$survpred)
-        )
-      ret <- structure(mean(y$res), 
-                       n_subjects_at_risk = nrow(y),
-                       t = t, u = u, 
-                       loss_function = loss_function,
-                       stanreg_name = deparse(substitute(object)),
-                       class = "predictive_error.survfit.stanjm")
-      return(ret)
-    } else { # prediction error for longitudinal submodel
-      
-      y <- if (is.null(newdataLong))
-        get_y(object, m = m) else 
-          eval(formula(object, m = m)[[2L]], newdataLong)
-      
-      fam <- family(object, m = m)$family
-      if (is.binomial(fam) && NCOL(y) == 2)
-        y <- y[, 1]      
-      
-      ytilde <- posterior_predict(
-        object,
-        m = m,
-        newdata = newdataLong,
-        draws = draws,
-        offset = offset,
-        seed = seed,
-        re.form = re.form
-      )
-      
-      return(predictive_error.ppd(ytilde, y = y))
-    }
+    fam <- family(object, m = m)$family
+    if (is.binomial(fam) && NCOL(y) == 2)
+      y <- y[, 1]      
+    
+    ytilde <- posterior_predict(
+      object,
+      m = m,
+      newdata = newdata,
+      draws = draws,
+      offset = offset,
+      seed = seed,
+      re.form = re.form
+    )
+    
+    return(predictive_error.ppd(ytilde, y = y))
   }
 
-
-# ------------------ exported but doc kept internal
-
-#' Generic print method for \code{predictive_error.survfit.stanjm} objects
-#' 
-#' @rdname print.predictive_error.survfit.stanjm
-#' @method print predictive_error.survfit.stanjm
-#' @keywords internal
-#' @export
-#' @param x An object of class \code{predictive_error.survfit.stanjm}, returned by a call to 
-#'   \code{\link{predictive_error}} (with argument \code{m = "Event"}).
-#' @param digits Number of digits to use for formatting the prediction error.
-#' @param ... Ignored.
-#' 
-print.predictive_error.survfit.stanjm <- function(x, digits = 4, ...) {
-  pe <- format(round(x, digits), nsmall = digits)
-  msg <- paste0("Event prediction error for model '", attr(x, "stanreg_name"), "'")
-  cat(msg)
-  cat("\n------")  
-  cat("\nEstimated prediction error:            ", pe)
-  cat("\nPrediction is calculated at time (t):  ", attr(x, "u"))
-  cat("\nUsing longitudinal data up to time (u):", attr(x, "t"))
-  cat("\nNum. subjects still at risk at time t: ", attr(x, "n_subjects_at_risk"))
-  cat("\nLoss function used:                    ", attr(x, "loss_function"))
-  cat("\n------")
-  invisible(x)
-}

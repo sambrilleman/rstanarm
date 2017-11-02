@@ -73,36 +73,36 @@
 #'     the maximum event or censoring time in the original data then the 
 #'     estimated survival probabilities will be truncated at that point, since
 #'     the estimate for the baseline hazard is not available beyond that time.}
-#' }
+#'   }
 #' @param condition A logical specifying whether the estimated 
-#'     subject-specific survival probabilities at time \code{t} should be 
-#'     conditioned on survival up to a fixed time point \code{u}. The default 
-#'     is for \code{condition} to be set to \code{TRUE}, unless standardised survival
-#'     probabilities have been requested (by specifying \code{standardise = TRUE}),
-#'     in which case \code{condition} must (and will) be set to \code{FALSE}.
-#'     When conditional survival probabilities are requested, the fixed
-#'     time point \code{u} will be either: (i) the value specified via the 
-#'     \code{last_time} argument; or if the \code{last_time} argument is 
-#'     \code{NULL} then the latest observation time for each individual 
-#'     (taken to be the value in the \code{times} argument if \code{newdataEvent} 
-#'     is specified, or the observed event or censoring time if \code{newdataEvent} 
-#'     is \code{NULL}.
+#'   subject-specific survival probabilities at time \code{t} should be 
+#'   conditioned on survival up to a fixed time point \code{u}. The default 
+#'   is for \code{condition} to be set to \code{TRUE}, unless standardised survival
+#'   probabilities have been requested (by specifying \code{standardise = TRUE}),
+#'   in which case \code{condition} must (and will) be set to \code{FALSE}.
+#'   When conditional survival probabilities are requested, the fixed
+#'   time point \code{u} will be either: (i) the value specified via the 
+#'   \code{last_time} argument; or if the \code{last_time} argument is 
+#'   \code{NULL} then the latest observation time for each individual 
+#'   (taken to be the value in the \code{times} argument if \code{newdataEvent} 
+#'   is specified, or the observed event or censoring time if \code{newdataEvent} 
+#'   is \code{NULL}.
 #' @param last_time A scalar, character string, or \code{NULL}. This argument 
-#'     specifies the last known survival time for each individual when
-#'     conditional predictions are being obtained. If 
-#'     \code{newdataEvent} is provided and conditional survival predictions are being
-#'     obtained, then the \code{last_time} argument can be one of the following:
-#'     (i) a scalar, this will use the same last time for each individual in 
-#'     \code{newdataEvent}; (ii) a character string, naming a column in 
-#'     \code{newdataEvent} in which to look for the last time for each individual;
-#'     (iii) \code{NULL}, in which case the default is to use the time of the latest 
-#'     longitudinal observation in \code{newdataLong}. If \code{newdataEvent} is
-#'     \code{NULL} then the \code{last_time} argument cannot be specified 
-#'     directly; instead it will be set equal to the event or censoring time for
-#'     each individual in the dataset that was used to estimate the model. 
-#'     If standardised survival probabilities are requested (i.e. 
-#'     \code{standardise = TRUE}) then conditional survival probabilities are
-#'     not allowed and therefore the \code{last_time} argument is ignored.
+#'   specifies the last known survival time for each individual when
+#'   conditional predictions are being obtained. If 
+#'   \code{newdataEvent} is provided and conditional survival predictions are being
+#'   obtained, then the \code{last_time} argument can be one of the following:
+#'   (i) a scalar, this will use the same last time for each individual in 
+#'   \code{newdataEvent}; (ii) a character string, naming a column in 
+#'   \code{newdataEvent} in which to look for the last time for each individual;
+#'   (iii) \code{NULL}, in which case the default is to use the time of the latest 
+#'   longitudinal observation in \code{newdataLong}. If \code{newdataEvent} is
+#'   \code{NULL} then the \code{last_time} argument cannot be specified 
+#'   directly; instead it will be set equal to the event or censoring time for
+#'   each individual in the dataset that was used to estimate the model. 
+#'   If standardised survival probabilities are requested (i.e. 
+#'   \code{standardise = TRUE}) then conditional survival probabilities are
+#'   not allowed and therefore the \code{last_time} argument is ignored.
 #' @param ids An optional vector specifying a subset of IDs for whom the 
 #'   predictions should be obtained. The default is to predict for all individuals
 #'   who were used in estimating the model or, if \code{newdataLong} and 
