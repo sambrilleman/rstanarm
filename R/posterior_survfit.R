@@ -390,82 +390,77 @@ posterior_survfit <- function(object, newdataLong = NULL, newdataEvent = NULL,
     stanmat <- stanmat[samp, , drop = FALSE]
   }
   pars_means <- extract_pars(object, means = TRUE) # list of posterior means
-  pars <- extract_pars(object, stanmat) # list of stanmat arrays
+  pars <- extract_pars(object, stanmat)            # list of stanmat arrays
 
-  # Draw b pars for new ids
+  # Draw REs for new patients
   if (!is.null(newdataEvent)) {
-    # Empty matrices used to collect draws for the new b pars
-    p <- .p(object) # num b pars for each grouping factor
-    b1_p <- p[[id_var]] # total num. of b pars for each individual
-    use_b2 <- (length(object$cnms) > 1L) 
+    vc <- VarCorr(object, stanmat = pars_means$stanmat) # var-cov mat for reffs
+    b1_sds <- attr(vc[[id_var]], "stddev") # sds for REs for id_var
+    b1_p <- length(b1_sds)                 # num REs for id_var
+    use_b2 <- (length(vc) > 1L)            # model has a second grouping factor?
     if (use_b2) { # more than one grouping factor
       if (M > 1)
         stop("'posterior_survfit' is not yet implemented for multivariate joint ",
              "models with multiple grouping factors.")
-      if (length(object$cnms) > 2L)
+      if (length(vc) > 2L)
         stop("'posterior_survfit' is not yet implemented for models with more than ",
              "two grouping factors.")  
-      b2_var <- grep(utils::glob2rx(id_var), names(p), value = TRUE, invert = TRUE)
-      b2_p <- p[[b2_var]] # total num. of b pars for second grouping factor
-      Ni <- tapply(ndL[[1]][[b2_var]], ndL[[1]][[id_var]], 
-                   function(x) length(unique(x)))
+      b2_var <- grep(utils::glob2rx(id_var), names(vc), 
+                     value = TRUE, invert = TRUE) # name of 2nd grouping factor
+      b2_sds <- attr(vc[[b2_var]], "stddev") # sds for REs for 2nd grouping factor
+      b2_p   <- length(b2_sds)               # num REs for 2nd grouping factor
+      b2_fl  <- ndL[[1]][[b2_var]]           # flist for 2nd grouping factor
+      b1_fl  <- factor(ndL[[1]][[id_var]])   # flist for id_var
+      Ni <- tapply(b2_fl, b1_fl, n_distinct) # num clusters within each patient
+      id_slot <- which(names(vc) == id_var)  # position of id_var in RE structure
     }
-    if (nodraw) { # no MH algorithm, just use point estimates for new REs
-      cat("Drawing random effects for", length(id_list), "new individuals.",
-          "Monitoring progress:\n")
-      pb <- utils::txtProgressBar(min = 0, max = length(id_list), style = 3)
-      b_new <- lapply(1:length(id_list), function(i) {
-        len_b <- if (use_b2) b1_p + Ni[id_list[[i]]] * b2_p else b1_p
-        # Design matrices for individual i only
-        dat_i <- .pp_data_jm(object, ndL, ndE, etimes = last_time[[i]], ids = id_list[[i]])
-        if (use_b2)
-          dat_i$Ni <- Ni[id_list[[i]]]
-        # Obtain mode of posterior distribution of new b pars based on asymptotic assumptions
-        inits <- rep(0, len_b)
-        val <- optim(inits, optim_fn, object = object, data = dat_i, 
-                     pars = pars_means, method = "BFGS", hessian = TRUE)$par
-        mat <- matrix(rep(val, nrow(stanmat)), nrow(stanmat), len_b, byrow = TRUE)
-        new_nms <- unlist(sapply(dat_i$assoc_parts, function(x) x$mod_eta$Z_names))
-        colnames(mat) <- paste0("b[", new_nms, "]")
-        utils::setTxtProgressBar(pb, i)
-        mat
-      })  
-      close(pb)
-    } else { # draw new REs using MH algorithm
-      cat("Drawing random effects for", length(id_list), "new individuals.",
-          "Monitoring progress:\n")
-      pb <- utils::txtProgressBar(min = 0, max = length(id_list), style = 3)
-      b_new <- list()
-      for (i in 1:length(id_list)) {
-        len_b <- if (use_b2) b1_p + Ni[id_list[[i]]] * b2_p else b1_p
-        mat <- matrix(NA, nrow(stanmat), len_b)
-        # Design matrices for individual i only
-        dat_i <- .pp_data_jm(object, ndL, ndE, etimes = last_time[[i]], ids = id_list[[i]])
-        if (use_b2)
-          dat_i$Ni <- Ni[id_list[[i]]]
-        # Obtain mode and var-cov matrix of posterior distribution of new b pars
-        # based on asymptotic assumptions, used as center and width of proposal
-        # distribution in MH algorithm
-        inits <- rep(0, len_b)
-        val <- optim(inits, optim_fn, object = object, data = dat_i, 
-                     pars = pars_means, method = "BFGS", hessian = TRUE)
-        delta_i <- val$par                    # asymptotic mode of posterior
+    cat("Drawing random effects for", length(id_list), "new individuals.",
+        "Monitoring progress:\n")
+    pb <- utils::txtProgressBar(min = 0, max = length(id_list), style = 3)
+    b_new <- list()
+    for (i in 1:length(id_list)) {
+      nm_i <- id_list[[i]]
+      time_i <- last_time[[i]]
+      if (!use_b2) {
+        b_sds <- b1_sds
+      } else if (id_slot == 1L) {
+        b_sds <- c(b1_sds, rep(b2_sds, Ni[nm_i]))
+      } else if (use_b2) {
+        b_sds <- c(rep(b2_sds, Ni[nm_i]), b1_sds)
+      }
+      b_len <- length(b_sds)
+      # Design matrices for individual i only
+      dat_i <- .pp_data_jm(object, ndL, ndE, etimes = time_i, ids = nm_i)
+      if (use_b2)
+        dat_i$Ni <- Ni[nm_i]
+      # Obtain mode and var-cov matrix of posterior distribution of new b pars
+      # based on asymptotic assumptions, used as center and width of proposal
+      # distribution in MH algorithm
+      inits <- rep(0, b_len)
+      val <- optim(inits, optim_fn, object = object, data = dat_i, 
+                   pars = pars_means, method = "BFGS", hessian = TRUE,
+                   control = list(maxit = 300, parscale = b_sds))
+      if (nodraw) { # no MH algorithm, just use point estimates for new REs
+        b_i <- val$par # asymptotic mode of posterior
+        mat <- matrix(rep(b_i, nrow(stanmat)), nrow(stanmat), b_len, byrow = TRUE)
+      } else { # draw new REs using MH algorithm
+        b_i <- val$par # asymptotic mode of posterior
         Sigma_i <- scale * solve(val$hessian) # (scaled) asymptotic vcov of posterior
-        b_current <- delta_i # asympotic mode used as init value for MH algorithm
-        # Run MH algorithm for each individual
-        for (s in 1:nrow(stanmat)) {
+        b_current <- b_i # asympotic mode used as init value for MH algorithm
+        mat <- matrix(NA, nrow(stanmat), b_len)
+        for (s in 1:nrow(stanmat)) { # run MH algorithm for individual i
           pars_s <- extract_pars(object, stanmat[s, , drop = FALSE])
           b_current <- mat[s,] <- 
-            mh_step(b_old = b_current, delta = delta_i, sigma = Sigma_i, 
+            mh_step(b_old = b_current, delta = b_i, sigma = Sigma_i, 
                     df = 4, object = object, data = dat_i, pars = pars_s)
         }
-        new_nms <- unlist(sapply(dat_i$assoc_parts, function(x) x$mod_eta$Z_names))
-        colnames(mat) <- paste0("b[", new_nms, "]")
-        b_new[[i]] <- mat
-        utils::setTxtProgressBar(pb, i)
-      }  
-      close(pb)
+      }
+      new_nms <- unlist(sapply(dat_i$assoc_parts, function(x) x$mod_eta$Z_names))
+      colnames(mat) <- paste0("b[", new_nms, "]")
+      b_new[[i]] <- mat
+      utils::setTxtProgressBar(pb, i)
     }
+    close(pb)
     b_new <- do.call("cbind", b_new)      # cbind new b pars for all individuals
     b_sel <- b_names(colnames(stanmat))   
     stanmat <- stanmat[, -b_sel, drop = FALSE] # drop old b pars from stanmat

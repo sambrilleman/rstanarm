@@ -552,11 +552,12 @@ ll_args.stanjm <- function(object, data, pars, m = 1,
     Z_names <- fetch_(data$assoc_parts, "mod_eta", "Z_names")
     b <- do.call("cbind", pars$b)
     b <- as.vector(pp_b_ord(b, Z_names))
-    Sigma_id <- VarCorr(object, stanmat = pars$stanmat)[[id_var]]
+    vc <- VarCorr(object, stanmat = pars$stanmat)
+    Sigma_id <- vc[[id_var]]
     if (length(cnms) > 1L) {
       b2_var <- grep(utils::glob2rx(id_var), names(cnms), 
                      value = TRUE, invert = TRUE)
-      Sigma_b2 <- VarCorr(object, stanmat = pars$stanmat)[[b2_var]]
+      Sigma_b2 <- vc[[b2_var]]
       Sigma_list <- rep(list(Sigma_b2), data$Ni)
       which_slot <- which(names(cnms) == b2_var)
       if (which_slot == 1L) {
