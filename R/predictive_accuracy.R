@@ -219,7 +219,14 @@ predictive_accuracy.stanjm <- function(object, newdataLong = NULL, newdataEvent 
       ind[ind4] <- ind[ind4] * (1 - survpred[nms_i]) * (survpred[nms_j])
     }
     
-    val <- sum((survpred_i < survpred_j) * c(ind), na.rm = TRUE) / sum(ind, na.rm = TRUE) 
+    # use same method for ties as survival pkg: see ?survival::survConcordance
+    agree    <- sum((survpred_i < survpred_j) * c(ind), na.rm = TRUE)
+    disagree <- sum((survpred_i > survpred_j) * c(ind), na.rm = TRUE)
+    tied     <- sum((survpred_i == survpred_j) * c(ind), na.rm = TRUE)
+    total <- agree + disagree + tied
+    if (sum(ind, na.rm = TRUE) != total)
+      stop2("Bug found: total and sum(ind) should be equal (= number of comparable pairs).")
+    val <- (agree + (0.5 * tied)) / total 
     
   } else if (type == "error") {
     

@@ -393,7 +393,7 @@ posterior_survfit <- function(object, newdataLong = NULL, newdataEvent = NULL,
   pars <- extract_pars(object, stanmat)            # list of stanmat arrays
 
   # Draw REs for new patients
-  if (!is.null(newdataEvent)) {
+  if (length(pars_means$abeta) && !is.null(newdataEvent)) {
     vc <- VarCorr(object, stanmat = pars_means$stanmat) # var-cov mat for reffs
     b1_sds <- attr(vc[[id_var]], "stddev") # sds for REs for id_var
     b1_p <- length(b1_sds)                 # num REs for id_var
@@ -466,7 +466,7 @@ posterior_survfit <- function(object, newdataLong = NULL, newdataEvent = NULL,
     stanmat <- stanmat[, -b_sel, drop = FALSE] # drop old b pars from stanmat
     stanmat <- cbind(stanmat, b_new)           # add new b pars to stanmat
     pars <- extract_pars(object, stanmat) # reextract pars list with new b pars
-  }      
+  } else b_new <- NULL
 
   # Matrix of surv probs at each increment of the extrapolation sequence
   # NB If no extrapolation then length(time_seq) == 1L
@@ -556,7 +556,7 @@ posterior_survfit <- function(object, newdataLong = NULL, newdataEvent = NULL,
   structure(out, id_var = id_var, time_var = time_var, extrapolate = extrapolate, 
             control = control, standardise = standardise, condition = condition, 
             last_time = last_time, ids = id_list, draws = draws, seed = seed, 
-            offset = offset, b_new = if (!is.null(newdataEvent)) b_new else NULL)
+            offset = offset, b_new = b_new)
 }
 
 #' Plot the estimated subject-specific or marginal survival function
