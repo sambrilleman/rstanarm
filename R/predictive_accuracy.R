@@ -146,23 +146,24 @@ predictive_accuracy.stanjm <- function(object, newdataLong = NULL, newdataEvent 
   # Observed y: event status at time u
   y <- ndE[, c(id_var, event_tvar, event_dvar), drop = FALSE]
   
+  # Predicted y: conditional survival probability at time u
+  ytilde <- posterior_survfit(
+    object, 
+    newdataLong = ndL, 
+    newdataEvent = ndE,
+    times = u,
+    last_time = t,
+    last_time2 = event_tvar,
+    condition = TRUE,
+    extrapolate = FALSE,
+    draws = draws,
+    seed = seed)
+  ytilde <- ytilde[, c(id_var, "survpred", "survpred_eventtime"), drop = FALSE]
+  
+  # Merge observed event status and predicted surv prob
+  y <- merge(y, ytilde, by = id_var)
+  
   if (type == "auc") {
-    
-    # Predicted y: conditional survival probability at time u
-    ytilde <- posterior_survfit(
-      object, 
-      newdataLong = ndL, 
-      newdataEvent = ndE,
-      times = u,
-      last_time = t,
-      condition = TRUE,
-      extrapolate = FALSE,
-      draws = draws,
-      seed = seed)
-    ytilde <- ytilde[, c(id_var, "survpred"), drop = FALSE]
-
-    # Merge observed event status and predicted surv prob
-    y <- merge(y, ytilde, by = id_var)
     
     # Extract necessary components as named vectors
     ids <- y[[id_var]]
@@ -170,8 +171,10 @@ predictive_accuracy.stanjm <- function(object, newdataLong = NULL, newdataEvent 
       stop2("Bug found: y should only contain one row per individual.")
     eventtime <- y[[event_tvar]]
     status    <- y[[event_dvar]]
-    survpred  <- y[["survpred"]]
-    names(ids) <- names(eventtime) <- names(status) <- names(survpred) <- ids
+    survpred  <- y[["survpred"]]           # last_time = t
+    survpred2 <- y[["survpred_eventtime"]] # last_time = known censoring time
+    names(ids) <- names(eventtime) <- names(status) <- 
+      names(survpred) <- names(survpred2) <- ids
     
     # Ensure eventtime_i <= eventtime_j (for subjects i and j)
     ord <- order(eventtime)
@@ -179,6 +182,7 @@ predictive_accuracy.stanjm <- function(object, newdataLong = NULL, newdataEvent 
     eventtime <- eventtime[ord]
     status    <- status[ord]
     survpred  <- survpred[ord]
+    survpred2 <- survpred2[ord]
     
     # Extract necessary components for each pair of subject (i,j)
     pairs <- combn(as.character(ids), 2)
@@ -201,22 +205,32 @@ predictive_accuracy.stanjm <- function(object, newdataLong = NULL, newdataEvent 
     ind <- ind1 | ind2 | ind3 | ind4
     
     if (any(ind2)) {
+      # if subject i was censored, then weight the contribution to AUC
+      # based on the (failure) probability that subject i would have
+      # died in interval between their known censoring time and time u
       nms <- strsplit(names(ind2[ind2]), "_")
       nms_i <- sapply(nms, `[`, 1L)
-      ind[ind2] <- ind[ind2] * (1 - survpred[nms_i])
+      ind[ind2] <- ind[ind2] * (1 - survpred2[nms_i])
     }
     
     if (any(ind3)) {
+      # if subject j was censored, then weight the contribution to AUC
+      # based on the (survival) probability that subject j would have
+      # survived from their known censoring time up until time u
       nms <- strsplit(names(ind3[ind3]), "_")
       nms_j <- sapply(nms, "[", 2)
-      ind[ind3] <- ind[ind3] * survpred[nms_j]
+      ind[ind3] <- ind[ind3] * survpred2[nms_j]
     }
     
     if (any(ind4)) {
+      # if subjects i and j were both censored, then weight the contribution 
+      # to AUC based on the (failure) probability for subject i and the
+      # (survival) probability for subject j, taken between each of their 
+      # known censoring times and the time horizon u
       nms <- strsplit(names(ind4[ind4]), "_")
       nms_i <- sapply(nms, "[", 1)
       nms_j <- sapply(nms, "[", 2)
-      ind[ind4] <- ind[ind4] * (1 - survpred[nms_i]) * (survpred[nms_j])
+      ind[ind4] <- ind[ind4] * (1 - survpred2[nms_i]) * (survpred2[nms_j])
     }
     
     # use same method for ties as survival pkg: see ?survival::survConcordance
@@ -229,23 +243,6 @@ predictive_accuracy.stanjm <- function(object, newdataLong = NULL, newdataEvent 
     val <- (agree + (0.5 * tied)) / total 
     
   } else if (type == "error") {
-    
-    # Predicted y: conditional survival probability at time u
-    ytilde <- posterior_survfit(
-      object, 
-      newdataLong = ndL, 
-      newdataEvent = ndE,
-      times = u,
-      last_time = t,
-      last_time2 = event_tvar,
-      condition = TRUE,
-      extrapolate = FALSE,
-      draws = draws,
-      seed = seed)
-    ytilde <- ytilde[, c(id_var, "survpred", "survpred_eventtime"), drop = FALSE]
-    
-    # Merge observed event status and predicted surv prob
-    y <- merge(y, ytilde, by = id_var)
     
     loss <- switch(loss_function,
                    square = function(x) {x*x},
