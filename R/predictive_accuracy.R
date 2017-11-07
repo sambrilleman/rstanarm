@@ -200,7 +200,7 @@ predictive_accuracy.stanjm <- function(object, newdataLong = NULL, newdataEvent 
     ind2 <- (times_i <= u & status_i == 0) & (times_j > u)
     ind3 <- (times_i <= u & status_i == 1) & (times_j <= u & status_j == 0)
     ind4 <- (times_i <= u & status_i == 0) & (times_j <= u & status_j == 0)
-    nms_ind <- paste(ids_i, "_", ids_j)
+    nms_ind <- paste0(ids_i, "_", ids_j)
     names(ind1) <- names(ind2) <- names(ind3) <- names(ind4) <- nms_ind
     ind <- ind1 | ind2 | ind3 | ind4
     
