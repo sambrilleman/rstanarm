@@ -238,8 +238,6 @@ predictive_accuracy.stanjm <- function(object, newdataLong = NULL, newdataEvent 
     disagree <- sum((survpred_i > survpred_j) * c(ind), na.rm = TRUE)
     tied     <- sum((survpred_i == survpred_j) * c(ind), na.rm = TRUE)
     total <- agree + disagree + tied
-    if (sum(ind, na.rm = TRUE) != total)
-      stop2("Bug found: total and sum(ind) should be equal (= number of comparable pairs).")
     val <- (agree + (0.5 * tied)) / total 
     
   } else if (type == "error") {
