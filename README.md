@@ -2,6 +2,8 @@
 <img src="https://raw.githubusercontent.com/stan-dev/logos/master/logo.png" width=200 alt="Stan Logo"/>
 </a>
 
+**Note:** This forked rstanarm repository is no longer being actively developed. All work related to joint modelling of longitudinal and time-to-event data, etc, has now been incorporated in the main [stan-dev/rstanarm](https://github.com/stan-dev/rstanarm) repository. Further developments will be carried out directly on branches of the [stan-dev/rstanarm](https://github.com/stan-dev/rstanarm) repository, so please see there.
+
 # rstanarm
 
 [![Build Status](https://travis-ci.org/stan-dev/rstanarm.svg?branch=master)](https://travis-ci.org/stan-dev/rstanarm)  
